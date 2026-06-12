@@ -1,0 +1,38 @@
+.idea/
+.m2/
+
+# Build outputs
+target/
+web-study-1.0.1/package/dist/
+web-study-1.0.1/package/node_modules/
+web-study-1.0.1/package/.npm-cache/
+*.map
+
+# Runtime and local logs
+logs/
+*.log
+*.out
+*.err
+
+# Local environment/configuration with secrets
+src/main/resources/application.properties
+target/classes/application.properties
+web-study-1.0.1/package/.env
+web-study-1.0.1/package/.env.*
+
+# Deployment bundles and sensitive maintenance scripts
+deploy/*.zip
+deploy/labcore-hotfix-*/
+deploy/**/backend/*.jar
+deploy/reset-admin-password.sh
+
+# Local test/extracted artifacts
+boottest.*
+mobile-test.html
+start-mobile-test.ps1
+labcore_init_verify.txt
+pdf2_extracted.txt
+tmp_server_manual.pdf
+target/*.png
+target/*token*.txt
+src/main/resources/db/*.broken-backup

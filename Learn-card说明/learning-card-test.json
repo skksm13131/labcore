@@ -1,0 +1,57 @@
+{
+  "title": "ChaCha20 流密码算法原理与实现",
+  "summary": "介绍 ChaCha20 的设计背景、状态矩阵、Quarter Round 轮函数和 Python 示例实现，适合作为新增学习卡片的联调用测试数据。",
+  "category": "现代密码学",
+  "difficulty": "中等",
+  "duration": "2小时",
+  "prerequisites": "基础密码学概念、异或运算、模加运算、Python 基础",
+  "objectives": [
+    "理解 ChaCha20 的设计目标与典型应用场景",
+    "掌握状态矩阵与 Quarter Round 核心轮函数",
+    "能够完成简化版密钥流生成与结果校验"
+  ],
+  "features": [
+    {
+      "title": "流密码结构",
+      "description": "通过密钥流与明文异或完成加解密，结构直观。"
+    },
+    {
+      "title": "软件实现高效",
+      "description": "适合通用 CPU 环境，工程实践中使用广泛。"
+    },
+    {
+      "title": "现代协议常见",
+      "description": "常见于 TLS、WireGuard 等协议栈。"
+    }
+  ],
+  "steps": [
+    {
+      "stepNo": 1,
+      "title": "了解算法背景",
+      "description": "理解 ChaCha20 与 Salsa20 的关系、设计背景与典型应用场景。",
+      "tip": "先关注为什么它特别适合软件实现。",
+      "code": ""
+    },
+    {
+      "stepNo": 2,
+      "title": "掌握状态矩阵",
+      "description": "学习常量、密钥、计数器、Nonce 在 4x4 状态矩阵中的布局方式。",
+      "tip": "建议配合矩阵图示理解 16 个 32 位字。",
+      "code": "def initial_state(constants, key_words, counter, nonce_words):\n    return constants + key_words + [counter] + nonce_words"
+    },
+    {
+      "stepNo": 3,
+      "title": "实现 Quarter Round",
+      "description": "用 Python 编写 Quarter Round 核心轮函数，并验证中间结果。",
+      "tip": "注意所有加法都应限制在 32 位无符号整数范围内。",
+      "code": "def rotl32(x, n):\n    return ((x << n) & 0xffffffff) | (x >> (32 - n))\n\n\ndef quarter_round(a, b, c, d):\n    a = (a + b) & 0xffffffff\n    d ^= a\n    d = rotl32(d, 16)\n\n    c = (c + d) & 0xffffffff\n    b ^= c\n    b = rotl32(b, 12)\n\n    a = (a + b) & 0xffffffff\n    d ^= a\n    d = rotl32(d, 8)\n\n    c = (c + d) & 0xffffffff\n    b ^= c\n    b = rotl32(b, 7)\n    return a, b, c, d"
+    },
+    {
+      "stepNo": 4,
+      "title": "生成密钥流并验证",
+      "description": "调用轮函数生成简化版密钥流，并使用断言验证输出长度与数据类型。",
+      "tip": "先验证单个 block，再考虑完整加解密流程。",
+      "code": "def xor_bytes(data, keystream):\n    return bytes(a ^ b for a, b in zip(data, keystream))\n\nplaintext = b'hello chacha20'\nkeystream = bytes(range(len(plaintext)))\nciphertext = xor_bytes(plaintext, keystream)\nassert len(ciphertext) == len(plaintext)"
+    }
+  ]
+}
