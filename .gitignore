@@ -36,3 +36,4 @@ tmp_server_manual.pdf
 target/*.png
 target/*token*.txt
 src/main/resources/db/*.broken-backup
+*.bundle
