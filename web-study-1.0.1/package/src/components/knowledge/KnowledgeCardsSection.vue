@@ -177,7 +177,14 @@ const emit = defineEmits(['show-details', 'open-details', 'start-learning'])
   color: #6b7280;
   line-height: 1.5;
   margin-bottom: 20px;
-  flex: 1;
+  flex: 0 0 42px;
+  max-height: 42px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
 .knowledge-actions {

@@ -28,20 +28,23 @@
           <!-- 分类选择下拉框 -->
           <div class="header-tools" v-show="activeSection === 'cards'">
             <div class="header-filters">
-              <el-select
-                v-model="selectedCategory"
-                placeholder="全部"
-                @change="filterByCategory"
-                style="width: 200px"
-              >
-                <el-option label="全部" value="" />
-                <el-option
-                  v-for="category in categories"
-                  :key="category"
-                  :label="category"
-                  :value="category"
-                />
-              </el-select>
+              <div class="category-filter">
+                <span class="category-filter-label">分类</span>
+                <el-select
+                  v-model="selectedCategory"
+                  placeholder="全部"
+                  class="category-select"
+                  @change="filterByCategory"
+                >
+                  <el-option label="全部" value="" />
+                  <el-option
+                    v-for="category in categories"
+                    :key="category"
+                    :label="category"
+                    :value="category"
+                  />
+                </el-select>
+              </div>
 
               <!-- 搜索框 -->
               <el-autocomplete
@@ -56,7 +59,7 @@
           </div>
         </div>
       </div>
-      
+
       <keep-alive>
         <KnowledgeCardsSection
           v-if="activeSection === 'cards'"
@@ -327,6 +330,35 @@ watch(experimentVisible, (visible) => {
   gap: 14px;
 }
 
+.category-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  box-shadow: 0 6px 14px rgba(30, 136, 229, 0.12);
+}
+
+.category-filter-label {
+  color: #1565C0;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.category-select {
+  width: 200px;
+}
+
+.category-select :deep(.el-select__wrapper) {
+  min-height: 34px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px #1E88E5 inset;
+}
+
 .section-switch {
   display: inline-flex;
   align-items: center;
@@ -377,6 +409,14 @@ watch(experimentVisible, (visible) => {
   .header-filters {
     width: 100%;
     flex-wrap: wrap;
+  }
+  .category-filter {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .category-select {
+    flex: 1;
+    width: auto;
   }
   .section-switch {
     margin-left: 0;
