@@ -1,9 +1,11 @@
 (function () {
   var FILE_PARAM = 'experimentFile';
   var TEMPLATE_PARAM = 'templateUrl';
+  var TEMPLATE_VERSION_PARAM = 'templateVersion';
   var ITEM_PARAM = 'itemPk';
   var WORKSPACE_PARAM = 'workspace';
-  var CLEAN_PARAMS = [FILE_PARAM, TEMPLATE_PARAM, ITEM_PARAM];
+  var RESET_PARAM = 'reset';
+  var CLEAN_PARAMS = [FILE_PARAM, TEMPLATE_PARAM, TEMPLATE_VERSION_PARAM, ITEM_PARAM, 'token'];
   var TRANSIENT_PARAMS = ['path', 'clone', 'reset'];
 
   function getLaunchConfig() {
@@ -21,9 +23,19 @@
     return {
       file: file,
       templateUrl: templateUrl,
+      templateVersion: params.get(TEMPLATE_VERSION_PARAM),
       workspace: workspace,
-      token: params.get('token')
+      token: params.get('token') || getStoredAccessToken(),
+      reset: params.get(RESET_PARAM) === '1' || params.get(RESET_PARAM) === 'true'
     };
+  }
+
+  function getStoredAccessToken() {
+    try {
+      return window.localStorage ? window.localStorage.getItem('token') : null;
+    } catch (error) {
+      return null;
+    }
   }
 
   function clearLaunchParams(workspace) {
@@ -81,8 +93,35 @@
     return response.json();
   }
 
-  async function ensureNotebook(contents, path, templateUrl, token) {
-    if (await fileExists(contents, path)) {
+  function getTemplateVersionKey(path) {
+    return 'labcore:experiment-template-version:' + path;
+  }
+
+  function readStoredTemplateVersion(path) {
+    try {
+      return window.localStorage ? window.localStorage.getItem(getTemplateVersionKey(path)) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function writeStoredTemplateVersion(path, version) {
+    if (!version) {
+      return;
+    }
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem(getTemplateVersionKey(path), version);
+      }
+    } catch (error) {
+      // Ignore storage failures; the notebook itself is still usable.
+    }
+  }
+
+  async function ensureNotebook(contents, path, templateUrl, token, templateVersion, reset) {
+    var exists = await fileExists(contents, path);
+    var storedVersion = readStoredTemplateVersion(path);
+    if (exists && !reset && (!templateVersion || storedVersion === templateVersion)) {
       return;
     }
 
@@ -92,6 +131,7 @@
       format: 'json',
       content: notebook
     });
+    writeStoredTemplateVersion(path, templateVersion);
   }
 
   function resolveFactoryName(app, path) {
@@ -121,7 +161,7 @@
     var path = config.file;
     var contents = app.serviceManager.contents;
 
-    await ensureNotebook(contents, path, config.templateUrl, config.token);
+    await ensureNotebook(contents, path, config.templateUrl, config.token, config.templateVersion, config.reset);
     await openNotebook(app, path);
     clearLaunchParams(config.workspace);
   }

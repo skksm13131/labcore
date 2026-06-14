@@ -25,6 +25,14 @@ deploy/*.zip
 deploy/labcore-hotfix-*/
 deploy/**/backend/*.jar
 deploy/reset-admin-password.sh
+ops/*.zip
+ops/**/backend/*.jar
+ops/**/frontend/dist/
+ops/**/__pycache__/
+ops/**/*.pyc
+ops/labcore-hotfix-20260613/
+ops/labcore-hotfix-20260614/data/
+ops/labcore-learning-json-import/
 
 # Local test/extracted artifacts
 boottest.*

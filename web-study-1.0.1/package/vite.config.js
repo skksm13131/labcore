@@ -17,6 +17,10 @@ export default defineConfig({
         // 开发环境代理到本地后端 (本地开发用)
         target: 'http://localhost:8080',
         changeOrigin: true
+      },
+      '/lite': {
+        target: 'http://localhost:8080',
+        changeOrigin: true
       }
     }
   },

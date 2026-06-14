@@ -49,6 +49,7 @@ public class ExperimentLaunchController {
                 .queryParam("workspace", workspaceId)
                 .queryParam("experimentFile", notebookFile)
                 .queryParam("templateUrl", notebookUrl)
+                .queryParam("templateVersion", resolveTemplateVersion(item))
                 .queryParam("itemPk", id)
                 .build()
                 .encode(StandardCharsets.UTF_8)
@@ -86,5 +87,15 @@ public class ExperimentLaunchController {
 
     private String resolveWorkspaceId(Long id) {
         return "experiment-" + id;
+    }
+
+    private String resolveTemplateVersion(LearningItem item) {
+        if (item.getUpdatedAt() != null) {
+            return item.getUpdatedAt().toString();
+        }
+        if (item.getPublishedAt() != null) {
+            return item.getPublishedAt().toString();
+        }
+        return String.valueOf(item.getItemPk());
     }
 }

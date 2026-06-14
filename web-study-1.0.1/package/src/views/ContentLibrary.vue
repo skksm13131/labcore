@@ -84,7 +84,7 @@
             <template #default="{ row }">
               <div class="row-actions">
                 <el-button size="small" @click="openEditDialog(row.id)">编辑</el-button>
-                <el-button size="small" @click="openUploadDialog(row)">上传模板</el-button>
+                <el-button size="small" @click="openUploadDialog(row)">模板管理</el-button>
                 <el-button
                   v-if="row.status !== 'PUBLISHED'"
                   size="small"
@@ -223,13 +223,33 @@
 
     <el-dialog
       v-model="uploadVisible"
-      title="上传实验模板"
-      width="520px"
+      title="实验模板管理"
+      width="560px"
       destroy-on-close
     >
-      <div class="upload-intro">
-        <p v-if="uploadTarget">当前卡片：{{ uploadTarget.title }}</p>
-        <p>请上传 `.ipynb` 格式的实验模板。学生首次进入实验时会基于这份模板生成个人副本。</p>
+      <div v-if="uploadTarget" class="template-manager">
+        <div class="template-status-card">
+          <div>
+            <span class="template-status-label">当前卡片</span>
+            <strong>{{ uploadTarget.title }}</strong>
+          </div>
+          <el-tag :type="uploadTarget.templateAvailable ? 'success' : 'info'">
+            {{ uploadTarget.templateAvailable ? '已上传模板' : '未上传模板' }}
+          </el-tag>
+        </div>
+        <div class="template-meta">
+          <div>
+            <span>模板路径</span>
+            <strong>{{ uploadTarget.templatePath || '暂无' }}</strong>
+          </div>
+          <div>
+            <span>更新时间</span>
+            <strong>{{ uploadTarget.updatedAt || '暂无' }}</strong>
+          </div>
+        </div>
+        <p class="upload-intro">
+          上传新的 `.ipynb` 文件会替换该卡片的默认实验模板。学生首次进入实验会生成个人副本；学生在实验页点击“恢复默认模板”时，也会重新拉取这里维护的模板。
+        </p>
       </div>
       <el-upload
         drag
@@ -246,7 +266,9 @@
 
       <template #footer>
         <el-button @click="closeUploadDialog">取消</el-button>
-        <el-button type="primary" :loading="uploading" @click="submitTemplateUpload">上传模板</el-button>
+        <el-button type="primary" :loading="uploading" @click="submitTemplateUpload">
+          {{ uploadTarget?.templateAvailable ? '替换模板' : '上传模板' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -451,10 +473,19 @@ const changeStatus = async (row, status) => {
   }
 }
 
-const openUploadDialog = row => {
+const openUploadDialog = async row => {
   uploadTarget.value = row
   selectedTemplateFile.value = null
   uploadVisible.value = true
+  try {
+    const detail = await getAdminLearningItem(row.id)
+    uploadTarget.value = {
+      ...row,
+      ...detail
+    }
+  } catch (error) {
+    // keep list row information if detail loading fails
+  }
 }
 
 const closeUploadDialog = () => {
@@ -682,6 +713,58 @@ onMounted(() => {
   color: #486581;
   line-height: 1.7;
   margin-bottom: 18px;
+}
+
+.template-manager {
+  margin-bottom: 18px;
+}
+
+.template-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #dbe7f3;
+  background: #f8fbff;
+}
+
+.template-status-card strong {
+  display: block;
+  margin-top: 6px;
+  color: #102a43;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.template-status-label,
+.template-meta span {
+  color: #829ab1;
+  font-size: 12px;
+}
+
+.template-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.template-meta div {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #e4edf7;
+}
+
+.template-meta strong {
+  display: block;
+  margin-top: 4px;
+  color: #243b53;
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-all;
 }
 
 @media (max-width: 980px) {

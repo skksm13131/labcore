@@ -12,6 +12,14 @@
         </div>
         <div class="experiment-actions">
           <button
+            class="experiment-reset-btn"
+            type="button"
+            :disabled="!experimentId || loading || isResetting"
+            @click="handleResetTemplate"
+          >
+            {{ isResetting ? '恢复中...' : '恢复默认模板' }}
+          </button>
+          <button
             class="experiment-complete-btn"
             type="button"
             :disabled="!experimentId || isCompleting"
@@ -85,7 +93,7 @@
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue'
 import request from '@/api/request'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { completeLearningProgress } from '@/api/knowledge'
 
 const props = defineProps({
@@ -112,6 +120,7 @@ const scrollY = ref(0)
 const completeDialogVisible = ref(false)
 const completeRemark = ref('')
 const isCompleting = ref(false)
+const isResetting = ref(false)
 
 const lockBody = () => {
   scrollY.value = window.scrollY || 0
@@ -157,10 +166,13 @@ const encodeBase64 = (value) => {
   }
 }
 
-const appendAuthParams = (launchUrl) => {
+const appendAuthParams = (launchUrl, options = {}) => {
   if (!launchUrl) return ''
   try {
     const url = new URL(launchUrl, window.location.origin)
+    if (options.reset) {
+      url.searchParams.set('reset', '1')
+    }
     const token = localStorage.getItem('token')
     if (token) {
       url.searchParams.set('token', token)
@@ -178,7 +190,7 @@ const appendAuthParams = (launchUrl) => {
   }
 }
 
-const loadExperiment = async () => {
+const loadExperiment = async (options = {}) => {
   loading.value = true
   error.value = ''
   iframeSrc.value = ''
@@ -188,7 +200,7 @@ const loadExperiment = async () => {
     error.value = '实验启动失败，请稍后重试'
     return
   }
-  iframeSrc.value = appendAuthParams(launchUrl)
+  iframeSrc.value = appendAuthParams(launchUrl, options)
 }
 
 const handleLoad = () => {
@@ -197,6 +209,28 @@ const handleLoad = () => {
 
 const closeOverlay = () => {
   emit('update:modelValue', false)
+}
+
+const handleResetTemplate = async () => {
+  if (!props.experimentId || isResetting.value) return
+  try {
+    await ElMessageBox.confirm(
+      '恢复默认模板会覆盖当前实验工作区里的同名 notebook，已经写入的内容将被替换。确定继续吗？',
+      '恢复默认模板',
+      {
+        confirmButtonText: '恢复默认模板',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    isResetting.value = true
+    await loadExperiment({ reset: true })
+    ElMessage.success('已重新加载默认模板')
+  } catch (error) {
+    // user cancelled
+  } finally {
+    isResetting.value = false
+  }
 }
 
 const openCompleteDialog = () => {
@@ -319,6 +353,32 @@ onBeforeUnmount(() => {
 .experiment-complete-btn:disabled {
   cursor: not-allowed;
   filter: grayscale(0.2);
+  opacity: 0.7;
+  box-shadow: none;
+  transform: none;
+}
+
+.experiment-reset-btn {
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 16px rgba(234, 88, 12, 0.12);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.experiment-reset-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(234, 88, 12, 0.18);
+  filter: brightness(0.99);
+}
+
+.experiment-reset-btn:disabled {
+  cursor: not-allowed;
   opacity: 0.7;
   box-shadow: none;
   transform: none;
