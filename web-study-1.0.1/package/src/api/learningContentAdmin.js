@@ -8,6 +8,14 @@ export function getAdminLearningItems(params = {}) {
   })
 }
 
+export function getAdminLearningItemStats(params = {}) {
+  return request({
+    url: '/admin/learning-items/stats',
+    method: 'get',
+    params
+  })
+}
+
 export function getAdminLearningItem(id) {
   return request({
     url: `/admin/learning-items/${id}`,

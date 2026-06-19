@@ -21,6 +21,18 @@ const adminRoutes = [
     meta: { title: '学习内容管理', requiresAuth: true, requiresAdmin: true }
   },
   {
+    path: 'admin-assignments',
+    name: 'AdminAssignments',
+    component: () => import('@/views/AdminAssignments.vue'),
+    meta: { title: '考核管理', requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: 'admin-assignments/:assignmentId/submissions',
+    name: 'AdminAssignmentSubmissions',
+    component: () => import('@/views/AdminAssignmentSubmissions.vue'),
+    meta: { title: '提交记录', requiresAuth: true, requiresAdmin: true }
+  },
+  {
     path: 'users/:userId/progress',
     name: 'UserProgressDetail',
     component: () => import('@/views/UserProgressDetail.vue'),
@@ -29,7 +41,7 @@ const adminRoutes = [
 ]
 
 const adminRouteNames = adminRoutes.map(route => route.name)
-const adminPathPrefixes = ['/users', '/admin-dashboard', '/content-library']
+const adminPathPrefixes = ['/users', '/admin-dashboard', '/content-library', '/admin-assignments']
 let adminRoutesAdded = false
 
 const routes = [
@@ -69,6 +81,18 @@ const routes = [
         name: 'LearnDashboard',
         component: () => import('@/views/LearnDashboard.vue'),
         meta: { title: '学习数据面板', requiresAuth: true }
+      },
+      {
+        path: 'assignments',
+        name: 'Assignments',
+        component: () => import('@/views/Assignments.vue'),
+        meta: { title: '能力考核', requiresAuth: true }
+      },
+      {
+        path: 'assignments/:assignmentId',
+        name: 'AssignmentDetail',
+        component: () => import('@/views/AssignmentDetail.vue'),
+        meta: { title: '考核详情', requiresAuth: true }
       },
       {
         path: 'profile',

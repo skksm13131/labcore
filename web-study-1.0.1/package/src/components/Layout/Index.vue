@@ -17,6 +17,7 @@
               <el-dropdown-item v-if="authStore.isAdmin" command="users">用户管理</el-dropdown-item>
               <el-dropdown-item v-if="authStore.isAdmin" command="content">学习内容管理</el-dropdown-item>
               <el-dropdown-item v-if="authStore.isAdmin" command="dashboard">平台学习总览</el-dropdown-item>
+              <el-dropdown-item v-if="authStore.isAdmin" command="assignments-admin">考核管理</el-dropdown-item>
               <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -49,6 +50,15 @@
             <el-icon><DataAnalysis /></el-icon>
             <span>学习数据面板</span>
           </router-link>
+
+          <router-link
+            to="/assignments"
+            class="menu-item"
+            :class="{ active: route.path === '/assignments' }"
+          >
+            <el-icon><DocumentChecked /></el-icon>
+            <span>能力考核</span>
+          </router-link>
         </div>
       </aside>
 
@@ -64,7 +74,7 @@ import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessageBox } from 'element-plus'
-import { DataAnalysis, Menu, Reading } from '@element-plus/icons-vue'
+import { DataAnalysis, DocumentChecked, Menu, Reading } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -103,6 +113,10 @@ const handleUserCommand = command => {
   }
   if (command === 'dashboard') {
     router.push('/admin-dashboard').catch(() => {})
+    return
+  }
+  if (command === 'assignments-admin') {
+    router.push('/admin-assignments').catch(() => {})
     return
   }
   if (command === 'logout') {

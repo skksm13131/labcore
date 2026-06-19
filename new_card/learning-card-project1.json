@@ -1,0 +1,95 @@
+{
+  "title": "Prompt Engineering — 大模型 API 调用与提示词设计",
+  "summary": "从 Transformer 架构与 token 的基本概念出发，系统讲解大语言模型的 API 调用方式。深入剖析 System Prompt 的设计方法论，涵盖 Zero-shot、Few-shot 等提示策略，掌握 temperature/top_p 等采样参数对输出行为的调控原理，最终实现用结构化提示词精确控制模型输出。",
+  "category": "智能体基础",
+  "difficulty": "入门",
+  "duration": "3小时",
+  "prerequisites": "Python 基础语法（函数、字典、列表）、了解 HTTP 请求的基本概念",
+  "objectives": [
+    "理解 Transformer 架构中 token 的概念与文本 tokenize 的过程",
+    "掌握 chat completions 接口中各参数的含义、取值范围与调优方法",
+    "理解 system/user/assistant 三种消息角色的设计意图与协作机制",
+    "掌握 System Prompt 的四要素设计法与 Few-shot 提示技巧",
+    "能够设计提示词方案让模型稳定输出 JSON、Markdown 等结构化格式",
+    "理解 API 响应结构并实现基本的错误处理"
+  ],
+  "features": [
+    {
+      "title": "Token 与 API 调用",
+      "description": "从 token 的基本概念出发，学习使用 OpenAI SDK 调用 DeepSeek API，理解请求与响应的完整数据结构。"
+    },
+    {
+      "title": "消息角色与提示策略",
+      "description": "深入理解 system/user/assistant 三种角色的设计意图，掌握 Zero-shot、Few-shot、CoT 等提示策略的原理与适用场景。"
+    },
+    {
+      "title": "输出控制与工程实践",
+      "description": "通过采样参数控制模型行为，学习 API 错误处理、环境变量管理等工程实践，构建可复用的调用基础设施。"
+    }
+  ],
+  "steps": [
+    {
+      "stepNo": 1,
+      "title": "理解 Transformer 与 Token 的概念",
+      "description": "大语言模型（LLM）基于 Transformer 架构，其核心是自注意力机制（Self-Attention），能够捕捉序列中任意两个位置之间的依赖关系。模型在海量文本上训练后，学会了根据上文预测下一个 token 的概率分布。\n\nToken 是模型处理文本的基本单位，不等于字也不等于词。对于英文，一个 token 大约是 3/4 个单词（如 'hello' 是 1 个 token，'unbelievable' 是 4 个 token）。对于中文，一个汉字通常是 1-2 个 token。例如'你好世界'大约 4-5 个 token。理解 token 很重要，因为 API 的计费、上下文窗口限制、输出长度限制都以 token 为单位。\n\n模型本身是'无状态'的——每次 API 调用都是独立的推理过程，模型不'记住'任何之前的对话。它只看到当前传入的 token 序列，根据训练中学到的统计规律自回归地（autoregressive）逐个生成后续 token。",
+      "tip": "可以用 tokenizer 工具查看文本的 token 数量：DeepSeek 兼容 OpenAI 的 tiktoken 库。理解 token 有助于后续项目中合理控制上下文长度和 API 成本。",
+      "code": "# 使用 tiktoken 查看 token 数量（DeepSeek 兼容 OpenAI 的编码）\nimport tiktoken\n\nencoder = tiktoken.get_encoding('cl100k_base')\n\ntext_en = 'Hello, how are you?'\ntext_zh = '你好，今天天气怎么样？'\n\nprint(f'英文 token 数: {len(encoder.encode(text_en))}')  # 约 6 个\nprint(f'中文 token 数: {len(encoder.encode(text_zh))}')  # 约 13 个"
+    },
+    {
+      "stepNo": 2,
+      "title": "掌握 API 客户端初始化与核心参数",
+      "description": "DeepSeek API 兼容 OpenAI SDK 格式，通过修改 base_url 即可切换服务商。核心调用接口是 chat.completions.create()，关键参数如下：\n\n- api_key：身份认证凭证，格式为 sk- 开头的字符串。API Key 对应一个账户额度，每次调用会消耗 token 配额。\n- base_url：API 服务端点地址。DeepSeek 为 https://api.deepseek.com，OpenAI 为 https://api.openai.com/v1。这个设计让你可以用同一套代码切换不同模型提供商。\n- model：选择具体模型。deepseek-chat 用于通用对话（类似 GPT-4 级别），deepseek-reasoner 用于深度推理（类似 o1 级别，会先输出思维链再给答案）。\n- messages：消息列表，是核心输入参数，决定模型'看到'什么内容。\n- temperature：采样温度，0.0~2.0，控制输出随机性。\n- max_tokens：限制模型最多生成多少 token。如果设置过小，回复会被截断（finish_reason 返回 'length' 而非 'stop'）。",
+      "tip": "api_key 永远不要硬编码在代码中提交到 Git。在实验室服务器上可以用环境变量：终端执行 set DEEPSEEK_API_KEY=sk-xxx（Windows）或 export DEEPSEEK_API_KEY=sk-xxx（Linux/Mac），代码中用 os.getenv() 读取。",
+      "code": "import os\nfrom openai import OpenAI\n\nclient = OpenAI(\n    api_key=os.getenv(\"DEEPSEEK_API_KEY\", \"sk-xxx\"),\n    base_url=\"https://api.deepseek.com\",\n)\n\nresponse = client.chat.completions.create(\n    model=\"deepseek-chat\",\n    messages=[\n        {\"role\": \"user\", \"content\": \"你好\"}\n    ],\n    temperature=0.7,\n    max_tokens=500\n)\n\nprint(response.choices[0].message.content)"
+    },
+    {
+      "stepNo": 3,
+      "title": "解析 API 响应结构",
+      "description": "API 返回的 response 对象包含丰富的信息，理解其结构对于调试和监控至关重要。顶层字段包括：id（请求唯一标识）、model（实际使用的模型）、usage（token 用量统计）和 choices（候选回复列表）。\n\nchoices[0] 包含：message（模型回复，含 role 和 content）、finish_reason（停止原因，'stop' 表示正常结束，'length' 表示达到 max_tokens 限制被截断，'content_filter' 表示被安全过滤）。\n\nusage 包含三个字段：prompt_tokens（输入 token 数）、completion_tokens（输出 token 数）、total_tokens（总计）。这些信息对于监控 API 消耗和优化 prompt 长度很有价值。通常输入 token 单价较低，输出 token 单价较高（约 4 倍），所以控制输出长度是节省成本的关键。",
+      "tip": "如果 finish_reason 是 'length'，说明回复被截断了，需要增大 max_tokens 重试。这是新手常犯的错误——以为模型'不想回答'，其实是输出被截断了。",
+      "code": "response = client.chat.completions.create(\n    model=\"deepseek-chat\",\n    messages=[{\"role\": \"user\", \"content\": \"用 200 字介绍深度学习\"}],\n    max_tokens=500\n)\n\n# 解析回复内容\nresult = response.choices[0].message\nprint(f\"回复内容: {result.content}\")\nprint(f\"停止原因: {response.choices[0].finish_reason}\")\n\n# 查看 token 用量\nprint(f\"\\n--- Token 用量 ---\")\nprint(f\"输入 tokens: {response.usage.prompt_tokens}\")\nprint(f\"输出 tokens: {response.usage.completion_tokens}\")\nprint(f\"总计 tokens: {response.usage.total_tokens}\")"
+    },
+    {
+      "stepNo": 4,
+      "title": "深入理解三种消息角色",
+      "description": "messages 列表中每条消息有 role 和 content 两个字段。role 有三种取值，各自承担不同职责：\n\nsystem（系统消息）：设定 AI 的行为规则、角色身份和输出格式。模型在训练时被强化了对 system 消息的遵循——它被训练为将 system 内容视为不可违背的行为准则。因此 system prompt 适合放置全局性的指令，如'你是一个翻译助手，只输出翻译结果'。\n\nuser（用户消息）：用户输入的问题或指令。这是对话的主要内容，模型对此进行响应。\n\nassistant（助手消息）：模型之前的回复。在多轮对话中，将之前的 assistant 消息保留在 messages 列表中，模型就能'看到'自己之前说了什么，从而维持对话连贯性。这也是项目三 Memory 机制的基础。\n\n一条关键原则：System Prompt 与 User Prompt 的分离不仅是格式要求，更是控制力的分层——system 层提供稳定的行为框架，user 层处理变化的具体输入。",
+      "tip": "把所有指令都放在 User Prompt 里也能工作，但当用户输入较长或包含干扰信息时，模型可能'忘记'遵循指令。将关键指令放在 System Prompt 中更稳定。",
+      "code": "# 单轮对话：只有 system + user\nmessages_single = [\n    {\"role\": \"system\", \"content\": \"你是一个专业的翻译助手，只输出翻译结果。\"},\n    {\"role\": \"user\", \"content\": \"请把'你好世界'翻译成英文\"}\n]\n\n# 多轮对话：包含历史 assistant 消息\nmessages_multi = [\n    {\"role\": \"system\", \"content\": \"你是一个友好的助手。\"},\n    {\"role\": \"user\", \"content\": \"我叫小明\"},\n    {\"role\": \"assistant\", \"content\": \"你好小明！很高兴认识你。\"},\n    {\"role\": \"user\", \"content\": \"我叫什么名字？\"}  # 模型能通过历史记录回答\n]"
+    },
+    {
+      "stepNo": 5,
+      "title": "掌握采样参数：temperature 与 top_p",
+      "description": "模型生成每个 token 时，会计算词表中所有 token 的概率分布，然后从中采样。采样参数决定了'如何选择'：\n\ntemperature（温度）：控制概率分布的'锐度'。temperature → 0 时，分布变得极其尖锐，模型几乎总是选概率最高的 token（贪心解码）；temperature 升高，分布变平坦，低概率 token 也有机会被选中。temperature = 0 或极小时输出最确定，1.5 以上输出高度随机。\n\ntop_p（核采样）：只从累积概率达到 p 的最小 token 集合中采样。top_p = 0.1 意味着只从概率最高的那几个 token 中选择。与 temperature 的区别在于：top_p 动态调整候选集大小——当模型很确定时候选少，不确定时候选多。\n\n通常只调其中一个。需要稳定输出（数据提取、日程规划）时设 temperature=0.0~0.3；一般对话设 0.7~1.0；创意写作设 1.2~1.5。",
+      "tip": "如果日程规划助手的 temperature 设为 1.5，同样的输入可能每次输出完全不同的时间表格式。结构化任务务必用低 temperature。",
+      "code": "# 贪心解码：temperature=0，输出最确定\nresp_greedy = client.chat.completions.create(\n    model=\"deepseek-chat\",\n    messages=[{\"role\": \"user\", \"content\": \"中国的首都是？\"}],\n    temperature=0.0  # 多次调用结果几乎完全相同\n)\n\n# 核采样：top_p=0.1，只从最可能的 token 中选择\nresp_topp = client.chat.completions.create(\n    model=\"deepseek-chat\",\n    messages=[{\"role\": \"user\", \"content\": \"给公司起个名字\"}],\n    top_p=0.1  # 候选集动态调整\n)"
+    },
+    {
+      "stepNo": 6,
+      "title": "System Prompt 的四要素设计法",
+      "description": "System Prompt 是 Prompt Engineering 的核心，它决定了模型的行为模式。一个有效的 System Prompt 应包含四个要素：\n\n1. 角色定义（Role）：你是谁。如'你是一个专业的日程规划助手'。角色定义帮助模型进入'专家模式'，激活与角色相关的训练知识。\n\n2. 任务描述（Task）：你要做什么。如'将用户杂乱的日程描述整理为清晰的时间表'。任务描述要具体明确，避免模糊表述。\n\n3. 输出格式（Format）：按什么格式输出。如'使用 Markdown 无序列表，时间用 24 小时制'。明确格式要求是获得结构化输出的关键。\n\n4. 约束条件（Constraint）：不能做什么。如'不要输出多余的解释，只输出时间表'。约束条件划定行为边界，防止模型'话多'。\n\n此外，在 System Prompt 中给出输出示例（Few-shot）比纯抽象描述更有效——模型对示例的遵循度通常高于对规则描述的理解。",
+      "tip": "一个好的检验标准：把 System Prompt 给一个完全不了解项目的人看，他能否准确预测模型的输出格式？如果不能，说明 prompt 还不够清晰。",
+      "code": "system_prompt = \"\"\"你是一个专业的日程规划助手。\n\n【任务】将用户杂乱的日程描述整理为清晰的时间表。\n\n【输出格式】\n1. 使用 Markdown 无序列表格式\n2. 时间统一使用 24 小时制 HH:MM 格式\n3. 按时间先后排序\n4. 每条格式为：- HH:MM 事项描述\n\n【约束】\n- 只输出时间表，不要附加任何解释或问候语\n- 如果用户没有指定具体时间的事项，放在列表末尾并标注'待定'\n\n【示例】\n输入：明天上午九点开会，下午有空写报告\n输出：\n- 09:00 开会\n- 待定 写报告\"\"\""
+    },
+    {
+      "stepNo": 7,
+      "title": "掌握 Few-shot Prompting 技巧",
+      "description": "Few-shot Prompting 是在提示中提供几个输入-输出示例，让模型'照样子'生成回答。这利用了模型的上下文学习（In-context Learning）能力——模型虽然不会因为你的示例而更新权重，但它会根据示例中的模式来推断你期望的输出格式和风格。\n\n根据示例数量分为：Zero-shot（无示例，只给指令）、One-shot（1 个示例）、Few-shot（2-5 个示例）。通常 2-3 个示例就能显著提高输出格式的稳定性。示例过多反而会浪费 token 并可能导致模型'过拟合'到示例内容。\n\n示例的选择原则：覆盖典型场景、格式一致、包含边界情况。如果示例之间有递进关系（从简单到复杂），效果更好。",
+      "tip": "Few-shot 示例放在 System Prompt 中（作为系统指令的一部分）还是 User Prompt 中（作为用户输入的一部分）都可以，但放在 System Prompt 中通常更稳定。",
+      "code": "# Zero-shot：只给指令\nsystem_zero = \"你是一个情绪分析器，输出 JSON 格式的情绪分析结果。\"\n\n# Few-shot：给指令 + 示例\nsystem_fewshot = \"\"\"你是一个情绪分析器。分析用户输入文本的情绪，输出 JSON 格式。\n\n示例 1：\n输入：太棒了！我今天拿到了 offer！\n输出：{\"emotion\": \"开心\", \"confidence\": \"高\"}\n\n示例 2：\n输入：哎，又下雨了...\n输出：{\"emotion\": \"悲伤\", \"confidence\": \"中\"}\n\n示例 3：\n输入：这个 bug 改了三遍还是不对！！！\n输出：{\"emotion\": \"愤怒\", \"confidence\": \"高\"}\n\n请分析以下输入：\"\"\""
+    },
+    {
+      "stepNo": 8,
+      "title": "API 错误处理与重试机制",
+      "description": "在实际调用中，API 请求可能因各种原因失败：网络超时、速率限制（rate limit，短时间内请求过多，返回 429 状态码）、服务端错误（500）、余额不足等。健壮的程序需要处理这些异常。\n\n常见的错误类型：openai.APIConnectionError（网络连接失败）、openai.RateLimitError（触发速率限制）、openai.APIStatusError（其他 HTTP 错误）。对于网络超时和速率限制，通常采用指数退避（exponential backoff）重试策略：第一次等 1 秒重试，第二次等 2 秒，第三次等 4 秒，以此类推。\n\nopenai SDK 内置了重试机制，默认会重试 2 次。也可以手动实现更精细的控制。",
+      "tip": "在实验室批量调用 API 时很容易触发速率限制。DeepSeek 的速率限制可以在控制台查看，建议每次请求之间加 time.sleep(0.5) 间隔。",
+      "code": "import time\nfrom openai import OpenAI, APIConnectionError, RateLimitError\n\nclient = OpenAI(\n    api_key=os.getenv(\"DEEPSEEK_API_KEY\"),\n    base_url=\"https://api.deepseek.com\",\n)\n\ndef call_with_retry(system_prompt, user_input, max_retries=3):\n    \"\"\"带指数退避重试的 API 调用\"\"\"\n    for attempt in range(max_retries):\n        try:\n            response = client.chat.completions.create(\n                model=\"deepseek-chat\",\n                messages=[\n                    {\"role\": \"system\", \"content\": system_prompt},\n                    {\"role\": \"user\", \"content\": user_input},\n                ],\n                temperature=0.2,\n            )\n            return response.choices[0].message.content\n        except RateLimitError:\n            wait_time = 2 ** attempt  # 指数退避：1s, 2s, 4s\n            print(f\"触发速率限制，等待 {wait_time}s 后重试...\")\n            time.sleep(wait_time)\n        except APIConnectionError:\n            print(f\"网络错误，第 {attempt+1} 次重试...\")\n            time.sleep(1)\n    return \"API 调用失败，请稍后重试\""
+    },
+    {
+      "stepNo": 9,
+      "title": "封装可复用的调用基础设施",
+      "description": "在实际项目中，应将 API 调用封装为可复用的函数或类。封装的好处：统一管理配置（model、base_url 等）、集中处理错误、方便后续项目复用。这个封装函数是后续四个项目的基础设施。\n\n好的封装应该：接受 system_prompt 和 user_input 作为必要参数，temperature 和 max_tokens 作为可选参数（有合理默认值），内部处理错误和重试，返回干净的字符串结果。也可以进一步封装为类，支持保存调用历史、统计 token 消耗等功能。",
+      "tip": "将这段代码保存为 utils.py 或 common.py，后续项目中直接 import 使用，避免每个 notebook 重复写初始化代码。",
+      "code": "import os\nfrom openai import OpenAI\n\nclient = OpenAI(\n    api_key=os.getenv(\"DEEPSEEK_API_KEY\", \"sk-xxx\"),\n    base_url=\"https://api.deepseek.com\",\n)\n\ndef call_deepseek(system_prompt, user_input, temperature=0.2, max_tokens=500):\n    \"\"\"\n    调用 DeepSeek API 的通用函数。\n    \n    参数:\n        system_prompt: 系统提示词，定义 AI 的角色和行为\n        user_input: 用户输入的内容\n        temperature: 创造性控制 (0.0~2.0)，默认 0.2\n        max_tokens: 最大输出 token 数，默认 500\n    返回:\n        str: 模型的回复内容\n    \"\"\"\n    response = client.chat.completions.create(\n        model=\"deepseek-chat\",\n        messages=[\n            {\"role\": \"system\", \"content\": system_prompt},\n            {\"role\": \"user\", \"content\": user_input},\n        ],\n        temperature=temperature,\n        max_tokens=max_tokens,\n    )\n    return response.choices[0].message.content\n\n\n# 测试\nresult = call_deepseek(\n    system_prompt=\"你是一个友好的助手，用一句话回答问题。\",\n    user_input=\"简短介绍一下深度学习？\"\n)\nprint(result)"
+    }
+  ]
+}

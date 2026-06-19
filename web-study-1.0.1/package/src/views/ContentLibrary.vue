@@ -14,7 +14,7 @@
       <section class="stats-grid">
         <article class="stat-card">
           <span>卡片总数</span>
-          <strong>{{ pagination.total }}</strong>
+          <strong>{{ stats.total }}</strong>
         </article>
         <article class="stat-card">
           <span>草稿</span>
@@ -281,6 +281,7 @@ import { UploadFilled } from '@element-plus/icons-vue'
 import {
   createAdminLearningItem,
   getAdminLearningItem,
+  getAdminLearningItemStats,
   getAdminLearningItems,
   updateAdminLearningItem,
   updateAdminLearningItemStatus,
@@ -309,6 +310,13 @@ const pagination = reactive({
   total: 0
 })
 
+const stats = reactive({
+  total: 0,
+  draft: 0,
+  published: 0,
+  archived: 0
+})
+
 const createEmptyForm = () => ({
   title: '',
   summary: '',
@@ -333,9 +341,9 @@ const categories = computed(() => {
   return Array.from(values)
 })
 
-const draftCount = computed(() => items.value.filter(item => item.status === 'DRAFT').length)
-const publishedCount = computed(() => items.value.filter(item => item.status === 'PUBLISHED').length)
-const archivedCount = computed(() => items.value.filter(item => item.status === 'ARCHIVED').length)
+const draftCount = computed(() => stats.draft)
+const publishedCount = computed(() => stats.published)
+const archivedCount = computed(() => stats.archived)
 
 const resetForm = () => {
   Object.assign(form, createEmptyForm())
@@ -398,15 +406,27 @@ const buildPayload = () => ({
 const fetchItems = async () => {
   loading.value = true
   try {
-    const pageData = await getAdminLearningItems({
+    const params = {
       keyword: filters.keyword || undefined,
       status: filters.status || undefined,
       category: filters.category || undefined,
       page: pagination.page,
       pageSize: pagination.pageSize
-    })
+    }
+    const [pageData, statData] = await Promise.all([
+      getAdminLearningItems(params),
+      getAdminLearningItemStats({
+        keyword: filters.keyword || undefined,
+        status: filters.status || undefined,
+        category: filters.category || undefined
+      })
+    ])
     items.value = pageData.records || []
     pagination.total = pageData.total || 0
+    stats.total = Number(statData.total || 0)
+    stats.draft = Number(statData.draft || 0)
+    stats.published = Number(statData.published || 0)
+    stats.archived = Number(statData.archived || 0)
   } finally {
     loading.value = false
   }

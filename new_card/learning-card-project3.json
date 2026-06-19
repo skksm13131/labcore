@@ -1,0 +1,88 @@
+{
+  "title": "Memory — 让智能体记住对话上下文",
+  "summary": "从大语言模型'无状态'的架构本质出发，系统讲解短期记忆的实现原理与管理策略。深入分析全量记忆、滑动窗口、摘要压缩三种方案的 token 开销与信息保留的权衡，探讨 Token 预算管理方法，以及 Memory 与 Tool Use 组合使用时的消息完整性约束。",
+  "category": "智能体核心能力",
+  "difficulty": "中等偏难",
+  "duration": "3小时",
+  "prerequisites": "项目一完成（掌握 API 调用）、项目二完成（理解 messages 结构与 tool 消息）",
+  "objectives": [
+    "从模型架构层面理解'无状态'的本质以及为什么需要 Memory 机制",
+    "掌握通过 messages 列表维护对话上下文的核心方法与实现细节",
+    "理解全量记忆、滑动窗口、摘要压缩三种策略的原理、优劣与适用场景",
+    "能够估算对话的 token 消耗并设计合理的 Token 预算",
+    "实现带记忆的工具调用智能体，正确处理 tool 消息的截断约束",
+    "了解长期记忆的概念与实现思路"
+  ],
+  "features": [
+    {
+      "title": "短期记忆机制",
+      "description": "将对话历史存储在 messages 列表中，每次调用 API 时把完整上下文一起发给模型。这是所有记忆策略的基础。"
+    },
+    {
+      "title": "记忆管理策略",
+      "description": "滑动窗口只保留最近 N 轮，摘要压缩将早期对话总结为概要，两者结合在 token 消耗和信息保留之间取得平衡。"
+    },
+    {
+      "title": "Token 预算管理",
+      "description": "估算对话各部分的 token 消耗，为记忆、工具描述、输出预留分别分配额度，实现可控的资源管理。"
+    }
+  ],
+  "steps": [
+    {
+      "stepNo": 1,
+      "title": "从模型架构理解'无状态'的本质",
+      "description": "大模型的 API 是无状态（Stateless）的——每次调用都是独立的推理过程，模型不会自动记住上次聊了什么。这不是 API 的设计缺陷，而是 Transformer 架构的固有特性。\n\n从技术层面看：模型的'知识'编码在神经网络的权重参数中（训练阶段确定），推理时权重是冻结的、只读的。模型没有可写的'记忆区域'——没有类似传统计算机的 RAM 或寄存器。每次调用，输入序列经过 Transformer 的多层自注意力计算，产生输出概率分布，整个过程是纯函数（pure function）：相同输入必然产生相同输出，不依赖任何外部状态。\n\n这意味着：如果两次调用传入完全相同的 messages，会得到（几乎）相同的回复。模型不会因为'上次聊过'就改变行为。每次 API 调用，模型只看到当前传入的 messages 列表，除此之外一无所知。\n\n无状态也是优势：API 调用之间互不影响，易于水平扩展（可以负载均衡到不同服务器）、故障恢复简单（重试即可）、并行处理方便。",
+      "tip": "这个'纯函数'特性在调试时很有用——你可以把 messages 列表保存下来，在任何时候重放同一次调用，复现模型的行为。",
+      "code": ""
+    },
+    {
+      "stepNo": 2,
+      "title": "通过 messages 列表实现短期记忆",
+      "description": "既然模型没有记忆，我们就主动把之前的对话记录告诉它。短期记忆的本质是：把对话历史存在一个 Python 列表里，每次调用时把完整的历史一起发给模型。\n\n具体实现：维护一个 messages 列表，初始包含 system prompt。每次用户说话时追加 user 消息，调用 API 获取回复，再把 assistant 消息追加进去。下次调用时，模型看到完整的对话历史，就能'记住'之前聊了什么。\n\n这个方案简单有效，但有一个隐含的成本：每轮对话增加 2 条消息（user + assistant），API 调用的输入 token 数随对话轮次线性增长。这意味着响应变慢、费用增加，最终可能超出上下文窗口限制。",
+      "tip": "messages 列表就是智能体的'工作记忆'。你可以把它理解为：智能体的'大脑'在云端（模型），'记事本'在本地（messages 列表）。每次思考前，先把记事本上的内容念给大脑听。",
+      "code": "class SimpleMemoryAgent:\n    \"\"\"最简单的记忆智能体：把所有对话历史都记住\"\"\"\n    \n    def __init__(self, system_prompt=\"你是一个友好的助手。\"):\n        self.messages = [\n            {\"role\": \"system\", \"content\": system_prompt}\n        ]\n    \n    def chat(self, user_text):\n        # 1. 把用户消息加入历史\n        self.messages.append({\"role\": \"user\", \"content\": user_text})\n        \n        # 2. 把完整历史发给模型\n        response = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=self.messages\n        )\n        reply = response.choices[0].message.content\n        \n        # 3. 把模型的回复也加入历史\n        self.messages.append({\"role\": \"assistant\", \"content\": reply})\n        \n        return reply\n    \n    def show_memory(self):\n        \"\"\"查看当前记忆内容\"\"\"\n        print(f\"当前记忆中有 {len(self.messages)} 条消息：\")\n        for i, msg in enumerate(self.messages):\n            print(f\"  [{i}] {msg['role']}: {msg['content'][:50]}...\")\n\n\n# 测试\nagent = SimpleMemoryAgent(\"你是一个友好的中文助手，请用简短的话回答。\")\nprint(agent.chat(\"我叫小明，我是一名研究生\"))\nprint(agent.chat(\"我叫什么名字？我是做什么的？\"))  # 模型能记住\nagent.show_memory()"
+    },
+    {
+      "stepNo": 3,
+      "title": "理解上下文窗口与 Token 预算",
+      "description": "直接把所有历史都塞给模型会遇到三个问题：\n\n1. 上下文窗口限制：deepseek-chat 最大 64K token（约 4-5 万汉字），超过限制 API 会报错。假设每轮对话约 200 token（user 100 + assistant 100），聊 300 轮就是 60K token，接近上限。\n\n2. 延迟增加：Transformer 的自注意力计算复杂度是 O(n²)，其中 n 是输入 token 数。输入越长，推理越慢。64K token 的推理时间可能是 1K token 的几十倍。\n\n3. 费用增加：API 按 token 计费，输入 token 越多越贵。而且存在'注意力稀释'问题——当上下文过长时，模型可能'忽略'中间部分的信息（'Lost in the Middle'现象）。\n\n因此需要 Token 预算管理：为 system prompt、对话历史、工具描述、输出预留分别分配 token 额度。例如：system prompt 预留 500 token，工具描述预留 500 token，对话历史预留 4000 token，输出预留 1000 token，总计 6000 token 的预算。",
+      "tip": "实际项目中，输出 token 的单价通常是输入 token 的 3-4 倍。所以控制输入长度（记忆管理）和控制输出长度（max_tokens）同样重要。",
+      "code": "import tiktoken\n\ndef count_tokens(text, model=\"gpt-4\"):  # DeepSeek 兼容 cl100k_base 编码\n    \"\"\"估算文本的 token 数量\"\"\"\n    encoder = tiktoken.get_encoding('cl100k_base')\n    return len(encoder.encode(text))\n\ndef count_messages_tokens(messages):\n    \"\"\"估算 messages 列表的总 token 数\"\"\"\n    total = 0\n    for msg in messages:\n        # 每条消息有固定的 overhead（role、分隔符等）约 4 token\n        total += 4\n        total += count_tokens(msg.get(\"content\", \"\"))\n    return total\n\n# 示例：监控对话的 token 消耗\nagent = SimpleMemoryAgent()\nfor i in range(5):\n    agent.chat(f\"这是第 {i+1} 轮对话的内容\")\n    tokens = count_messages_tokens(agent.messages)\n    print(f\"第 {i+1} 轮后，messages 总 token 数约: {tokens}\")"
+    },
+    {
+      "stepNo": 4,
+      "title": "掌握滑动窗口策略",
+      "description": "滑动窗口是最简单的记忆管理策略：只保留最近 N 轮对话，丢弃更早的历史。实现方式是在 messages 列表中维护一个 recent_messages 子列表，当对话轮数超过窗口大小时，截断最早的消息。\n\n优点：实现简单，token 消耗稳定（不随对话增长），适合实时性强的场景（如客服对话，用户很少引用很早之前的内容）。\n\n缺点：会丢失早期信息。如果用户第一轮说了名字，聊了 20 轮后问'我叫什么'，模型答不上来。这在需要'长期跟踪'的场景中是致命缺陷。\n\n窗口大小的选择需要权衡：太小（如 2 轮）会丢失必要的上下文（模型可能'忘记'用户刚才说的需求），太大（如 20 轮）会增加 token 消耗。通常 3-5 轮是一个合理的起点，具体取决于对话的'上下文依赖密度'——每轮对话中包含多少需要跨轮引用的信息。",
+      "tip": "一个实用的技巧：在截断时保留 system prompt 和最近一轮对话，而不是机械地按窗口大小截断。这样至少模型能处理当前话题。",
+      "code": "class SlidingWindowAgent:\n    \"\"\"滑动窗口记忆智能体\"\"\"\n    \n    def __init__(self, system_prompt, window_size=4):\n        self.system_prompt = system_prompt\n        self.window_size = window_size  # 保留最近几轮对话\n        self.recent_messages = []\n    \n    def chat(self, user_text):\n        self.recent_messages.append({\"role\": \"user\", \"content\": user_text})\n        \n        # 超过窗口大小时，截断最早的消息\n        max_messages = self.window_size * 2  # 每轮有 user + assistant 两条\n        if len(self.recent_messages) > max_messages:\n            # 保留最近的 max_messages 条\n            self.recent_messages = self.recent_messages[-max_messages:]\n        \n        # 构建发给模型的 messages\n        messages = [{\"role\": \"system\", \"content\": self.system_prompt}]\n        messages.extend(self.recent_messages)\n        \n        response = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=messages\n        )\n        reply = response.choices[0].message.content\n        self.recent_messages.append({\"role\": \"assistant\", \"content\": reply})\n        \n        return reply\n    \n    def show_memory(self):\n        print(f\"窗口大小: {self.window_size} 轮\")\n        print(f\"当前保留: {len(self.recent_messages) // 2} 轮对话\")\n        for msg in self.recent_messages:\n            print(f\"  {msg['role']}: {msg['content'][:50]}...\")"
+    },
+    {
+      "stepNo": 5,
+      "title": "掌握摘要压缩策略",
+      "description": "摘要压缩策略在滑动窗口的基础上，将早期对话总结成一段摘要保留，兼顾 token 效率与信息保留。\n\n具体做法：当对话超过窗口大小时，把最早的几轮对话发给模型（一次额外的 API 调用），让它生成 1-2 句话的摘要，然后用摘要替换掉那些早期对话。摘要累积追加——如果之前已有摘要，新摘要接在旧摘要后面。\n\n最终发给模型的 messages 结构为：system prompt + 摘要消息（如果有）+ 最近 N 轮对话。摘要作为 system 角色的消息，因为它是'背景信息'而非'对话内容'。\n\n优缺点：比纯滑动窗口保留了更多信息（关键事实存在于摘要中），但摘要是模型生成的，可能丢失细节或引入偏差。摘要本身也消耗 token（一次额外的 API 调用），可以定期批量压缩（如每积累 5 轮压缩一次）来降低开销。",
+      "tip": "摘要生成时 temperature 应设低（0.1~0.3），因为需要忠实于原始对话内容，不需要创造性。",
+      "code": "class SmartMemoryAgent:\n    \"\"\"滑动窗口 + 摘要压缩的记忆智能体\"\"\"\n    \n    def __init__(self, system_prompt, window_size=4):\n        self.system_prompt = system_prompt\n        self.window_size = window_size\n        self.summary = \"\"              # 早期对话的摘要\n        self.recent_messages = []      # 最近 N 轮对话\n    \n    def _summarize(self, old_messages):\n        \"\"\"把旧对话压缩成摘要（消耗一次 API 调用）\"\"\"\n        old_text = \"\\n\".join(\n            f\"{m['role']}: {m['content']}\" for m in old_messages\n        )\n        summary_prompt = [\n            {\"role\": \"system\", \"content\": \"你是一个摘要助手。请用 1-2 句话总结以下对话中的关键信息，包括人名、数字、重要决定等。\"},\n            {\"role\": \"user\", \"content\": f\"请总结以下对话：\\n{old_text}\"}\n        ]\n        response = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=summary_prompt,\n            temperature=0.3  # 低温度，忠实于原文\n        )\n        return response.choices[0].message.content\n    \n    def _build_messages(self):\n        \"\"\"构建发给模型的完整 messages 列表\"\"\"\n        messages = [{\"role\": \"system\", \"content\": self.system_prompt}]\n        if self.summary:\n            messages.append({\n                \"role\": \"system\",\n                \"content\": f\"以下是之前对话的摘要：{self.summary}\"\n            })\n        messages.extend(self.recent_messages)\n        return messages\n    \n    def chat(self, user_text):\n        self.recent_messages.append({\"role\": \"user\", \"content\": user_text})\n        \n        max_messages = self.window_size * 2\n        if len(self.recent_messages) > max_messages:\n            old_msgs = self.recent_messages[:2]  # 取出最早的 1 轮\n            self.recent_messages = self.recent_messages[2:]\n            \n            new_summary = self._summarize(old_msgs)\n            if self.summary:\n                self.summary += \"\\n\" + new_summary\n            else:\n                self.summary = new_summary\n            print(f\"[记忆压缩] 当前摘要：{self.summary}\")\n        \n        messages = self._build_messages()\n        response = client.chat.completions.create(\n            model=\"deepseek-chat\", messages=messages\n        )\n        reply = response.choices[0].message.content\n        self.recent_messages.append({\"role\": \"assistant\", \"content\": reply})\n        return reply"
+    },
+    {
+      "stepNo": 6,
+      "title": "Token 预算管理实战",
+      "description": "在实际项目中，需要对 token 消耗进行精细管理。一个实用的方案是设定 Token 预算，将总预算分配给各个部分：\n\n- system prompt：固定开销，通常 200-500 token\n- 工具描述（tools）：如果使用了 Tool Use，工具描述也占 token，通常 200-800 token\n- 对话历史（记忆）：可变开销，是记忆管理的主要目标\n- 输出预留（max_tokens）：通常 500-2000 token\n\n总预算 = system + tools + history + output ≤ context_window\n\n因此 history 的可用预算 = context_window - system - tools - output\n\n例如：64K 窗口 - 500(system) - 500(tools) - 2000(output) = 61000 token 可用于对话历史。但如果希望响应快速（低延迟），可能将历史预算控制在 4000 token 以内。\n\n实现时可以在每次追加消息前检查当前 token 数，超过预算时触发压缩或截断。",
+      "tip": "在生产环境中，建议记录每次 API 调用的实际 token 消耗（response.usage），用于校准估算模型和优化预算分配。",
+      "code": "class TokenBudgetManager:\n    \"\"\"Token 预算管理器\"\"\"\n    \n    def __init__(self, total_budget=8000, system_tokens=500, \n                 tool_tokens=500, output_tokens=1000):\n        self.total_budget = total_budget\n        self.system_tokens = system_tokens\n        self.tool_tokens = tool_tokens\n        self.output_tokens = output_tokens\n        # 对话历史的可用预算\n        self.history_budget = total_budget - system_tokens - tool_tokens - output_tokens\n    \n    def check_and_trim(self, messages, trim_func):\n        \"\"\"检查 token 是否超预算，超过时调用 trim_func 进行截断\"\"\"\n        current_tokens = count_messages_tokens(messages)\n        if current_tokens > self.history_budget:\n            print(f\"[Token 预算] 当前 {current_tokens} > 预算 {self.history_budget}，触发截断\")\n            messages = trim_func(messages)\n        return messages\n    \n    def report(self, messages):\n        \"\"\"报告当前 token 使用情况\"\"\"\n        current = count_messages_tokens(messages)\n        print(f\"Token 使用: {current}/{self.history_budget} \"\n              f\"({current/self.history_budget*100:.1f}%)\")"
+    },
+    {
+      "stepNo": 7,
+      "title": "结合 Memory 与 Tool Use",
+      "description": "在实际应用中，Memory 和 Tool Use 经常组合使用。带记忆的工具调用智能体需要同时维护 messages 列表（用于记忆）和 tools 参数（用于工具调用）。这引入了额外的复杂性：\n\n消息完整性约束：截断记忆时不能破坏 tool 消息的完整性。role 为 tool 的消息必须与其对应的 assistant 消息（含 tool_calls）一起保留或一起删除。如果只删除了 assistant 消息而留下了 tool 消息（或反过来），API 会报错。\n\n建议以'交互轮次'为单位进行截断：一个完整的交互轮次包括 user 消息 → assistant 消息（可能含 tool_calls）→ tool 消息（可能有多个）→ assistant 最终回复。截断时以这个完整单元为粒度。\n\nSystem prompt 中的工具描述始终保留，不计入对话历史的截断范围。工具描述在每次 API 调用时通过 tools 参数传入，不占用 messages 列表的空间。",
+      "tip": "设计带记忆的工具智能体时，建议在 messages 中用'分隔标记'或数据结构来标识每个交互轮次的边界，便于按轮次截断。",
+      "code": "class MemoryToolAgent:\n    \"\"\"带记忆 + 工具调用的智能体\"\"\"\n    \n    def __init__(self, system_prompt, tools, tool_registry, window_size=5):\n        self.system_prompt = system_prompt\n        self.tools = tools\n        self.tool_registry = tool_registry\n        self.window_size = window_size\n        self.messages = [{\"role\": \"system\", \"content\": system_prompt}]\n    \n    def chat(self, user_text):\n        self.messages.append({\"role\": \"user\", \"content\": user_text})\n        \n        # 调用 API（带 tools 参数）\n        response = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=self.messages,\n            tools=self.tools\n        )\n        assistant_msg = response.choices[0].message\n        \n        # 处理工具调用\n        if assistant_msg.tool_calls:\n            # 添加 assistant 消息（含 tool_calls）\n            tool_calls_dict = [{\n                \"id\": tc.id, \"type\": \"function\",\n                \"function\": {\"name\": tc.function.name, \"arguments\": tc.function.arguments}\n            } for tc in assistant_msg.tool_calls]\n            self.messages.append({\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": tool_calls_dict})\n            \n            # 执行工具并添加 tool 消息\n            for tc in assistant_msg.tool_calls:\n                args = json.loads(tc.function.arguments)\n                result = self.tool_registry[tc.function.name](**args)\n                self.messages.append({\"role\": \"tool\", \"tool_call_id\": tc.id, \"content\": result})\n            \n            # 再次调用 API 获取最终回复\n            response = client.chat.completions.create(\n                model=\"deepseek-chat\",\n                messages=self.messages,\n                tools=self.tools\n            )\n            reply = response.choices[0].message.content\n        else:\n            reply = assistant_msg.content\n        \n        self.messages.append({\"role\": \"assistant\", \"content\": reply})\n        \n        # 截断记忆（以完整轮次为单位）\n        self._trim_memory()\n        return reply\n    \n    def _trim_memory(self):\n        \"\"\"按完整轮次截断记忆，保持 tool 消息的完整性\"\"\"\n        # system prompt 始终保留\n        non_history = 1  # system prompt 占 1 条\n        history = self.messages[non_history:]\n        \n        # 按轮次分组：一个轮次 = user + (可选的 assistant[tool_calls] + tool[]) + assistant\n        # 简单实现：统计 user 消息数量，超过 window_size 时截断\n        user_count = sum(1 for m in history if m[\"role\"] == \"user\")\n        if user_count > self.window_size:\n            # 找到第 (user_count - window_size + 1) 个 user 消息的位置\n            user_indices = [i for i, m in enumerate(history) if m[\"role\"] == \"user\"]\n            cut_point = user_indices[user_count - self.window_size]\n            self.messages = self.messages[:non_history] + history[cut_point:]"
+    },
+    {
+      "stepNo": 8,
+      "title": "长期记忆简介",
+      "description": "本项目聚焦的是短期记忆（单次会话内的上下文），但实际应用中还可能需要长期记忆——跨会话的持久化知识。例如：用户上周告诉助手自己对花粉过敏，这周问'推荐一个周末活动'时，助手应该记住这个信息。\n\n长期记忆的常见实现方式：\n\n1. 键值存储：将用户的关键信息（姓名、偏好、历史订单等）提取后存入数据库（如 Redis、SQLite），下次会话时读取并注入 system prompt。简单但需要手动设计存储结构。\n\n2. 向量数据库：将对话历史用 Embedding 模型转为向量，存入向量数据库（如 Chroma、FAISS）。新对话开始时，根据用户当前输入做语义检索，找到最相关的历史片段注入上下文。这就是 RAG（Retrieval-Augmented Generation）的思路。\n\n3. 摘要持久化：将每次会话的最终摘要保存到文件，下次会话时加载。这是本项目摘要压缩策略的自然延伸。\n\n长期记忆的核心挑战是'记什么'和'何时检索'——不是所有对话内容都值得记住，也不是所有历史信息在每次对话中都有用。",
+      "tip": "如果你后续想深入学习，可以关注 RAG 技术——它是当前工业界实现长期记忆的主流方案，结合了信息检索和文本生成的优势。",
+      "code": "# 长期记忆的简单示例：基于文件的摘要持久化\nimport json\nimport os\n\nclass PersistentMemoryAgent:\n    \"\"\"带持久化记忆的简单示例\"\"\"\n    \n    def __init__(self, system_prompt, memory_file=\"memory.json\"):\n        self.system_prompt = system_prompt\n        self.memory_file = memory_file\n        self.long_term_memory = self._load_memory()\n        self.messages = self._build_initial_messages()\n    \n    def _load_memory(self):\n        \"\"\"从文件加载长期记忆\"\"\"\n        if os.path.exists(self.memory_file):\n            with open(self.memory_file, \"r\", encoding=\"utf-8\") as f:\n                return json.load(f)\n        return {\"user_info\": \"\", \"key_facts\": []}\n    \n    def _save_memory(self):\n        \"\"\"保存长期记忆到文件\"\"\"\n        with open(self.memory_file, \"w\", encoding=\"utf-8\") as f:\n            json.dump(self.long_term_memory, f, ensure_ascii=False, indent=2)\n    \n    def _build_initial_messages(self):\n        \"\"\"构建初始 messages，注入长期记忆\"\"\"\n        messages = [{\"role\": \"system\", \"content\": self.system_prompt}]\n        if self.long_term_memory[\"user_info\"]:\n            messages.append({\n                \"role\": \"system\",\n                \"content\": f\"关于用户的已知信息：{self.long_term_memory['user_info']}\"\n            })\n        return messages"
+    }
+  ]
+}

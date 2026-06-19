@@ -10,6 +10,7 @@ LabCore 是一个面向课程学习与在线实验的学习平台。当前版本
 - 在线练习使用 JupyterLite 打开学习卡片对应的 Notebook 模板。
 - 实验页支持恢复默认模板，会重新从服务端模板覆盖用户本地浏览器中的旧副本。
 - 新增 5 个智能体实验模板，覆盖日程规划、工具调用、对话记忆、代码沙箱、多智能体协作等主题。
+- 新增作业提交模块：学生可上传文档/视频，管理员可查看、下载、评分和退回。
 
 ## 技术栈
 
@@ -21,7 +22,10 @@ LabCore 是一个面向课程学习与在线实验的学习平台。当前版本
 
 ```text
 src/main/java/                         后端源码
-src/main/resources/db/labcore.sql       数据库初始化脚本
+src/main/resources/db/labcore_full_init.sql    推荐使用的完整初始化/安全补丁脚本
+src/main/resources/db/labcore_schema_clean.sql 干净建表脚本，不包含学习卡片种子数据
+src/main/resources/db/assignment_module.sql    作业模块独立建表脚本
+src/main/resources/db/labcore.sql              历史旧数据 dump，不建议作为新部署首选
 src/main/resources/static/lite/         JupyterLite 静态运行环境
 src/main/resources/static/experiments/  打包进后端静态资源的 Notebook 示例/备用资源
 data/learning-templates/                学习卡片绑定的 Notebook 模板目录
@@ -142,8 +146,52 @@ ops/import_learning_cards.preview.sql
 在堡垒机离线环境中，如果系统没有 `mysql` 命令，需要使用内置 MySQL 客户端的完整路径，例如：
 
 ```bash
-/opt/learning-platform/mysql/bin/mysql -uroot -p123456 -h127.0.0.1 -P3306 labcore < import_learning_cards.preview.sql
+/opt/learning-platform/mysql/bin/mysql -uroot -p -h127.0.0.1 -P3306 labcore < import_learning_cards.preview.sql
 ```
+
+## 能力考核模块
+
+能力考核模块入口：
+
+```text
+学生端：能力考核
+管理员端：头像菜单 -> 考核管理
+```
+
+新增表结构保存在：
+
+```text
+src/main/resources/db/assignment_module.sql
+```
+
+数据库初始化或补丁升级可以分文件执行，推荐顺序：
+
+```bash
+# 1. 如果是全新空库，先建基础表；已有 labcore 旧库可以跳过这一步
+mysql -uroot -p < src/main/resources/db/labcore_schema_clean.sql
+
+# 2. 导入/更新 5 张智能体学习卡片及完整学习步骤
+mysql -uroot -p < ops/import_learning_cards.preview.sql
+
+# 3. 新增本次作业提交模块表
+mysql -uroot -p < src/main/resources/db/assignment_module.sql
+```
+
+`ops/import_learning_cards.preview.sql` 会创建/使用 `labcore` 数据库，并写入 5 张智能体学习卡片、完整学习步骤和模板路径：
+
+```text
+53 Prompt Engineering — 大模型 API 调用与提示词设计
+54 Tool Use — 让智能体具备外部工具调用能力
+55 Memory — 让智能体记住对话上下文
+56 Code Sandbox — 让智能体自己写代码、自己执行
+57 Multi-Agent — 多智能体分工协作系统
+```
+
+对应 Notebook 模板路径为 `data/learning-templates/item-53/template.ipynb` 到 `item-57/template.ipynb`。
+
+`src/main/resources/db/labcore_full_init.sql` 也保留为一体化脚本，内容等价于基础表 + 智能体卡片 + 作业表 + 默认管理员，适合需要一次性初始化时使用。
+
+历史 `src/main/resources/db/labcore.sql` 是旧数据 dump，包含学习卡片历史数据。当前验证发现其中部分旧 INSERT 内容存在乱码/引号损坏，不建议作为全新部署的第一选择。
 
 ## Git 版本管理
 

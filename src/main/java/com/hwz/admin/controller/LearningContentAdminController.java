@@ -37,6 +37,14 @@ public class LearningContentAdminController {
         return Result.ok(learningContentAdminService.pageItems(keyword, status, category, normalizePage(page), normalizePageSize(pageSize)));
     }
 
+    @GetMapping("/stats")
+    public Result<Map<String, Long>> stats(@RequestParam(required = false) String keyword,
+                                           @RequestParam(required = false) String status,
+                                           @RequestParam(required = false) String category) {
+        accessService.requireAdmin();
+        return Result.ok(learningContentAdminService.stats(keyword, status, category));
+    }
+
     @GetMapping("/{itemId}")
     public Result<AdminLearningItemDetailResponse> detail(@PathVariable Long itemId) {
         accessService.requireAdmin();

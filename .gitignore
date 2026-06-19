@@ -45,3 +45,8 @@ target/*.png
 target/*token*.txt
 src/main/resources/db/*.broken-backup
 *.bundle
+
+# Runtime uploaded user files and extracted deployment packages
+data/assignment-submissions/
+data/assignment-materials/
+ops/labcore-assessment-update-*/

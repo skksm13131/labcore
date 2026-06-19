@@ -49,7 +49,7 @@ public class AuthContextFilter extends OncePerRequestFilter {
             if (path != null && path.startsWith("/api") && !path.startsWith("/api/auth")) {
                 String authorization = request.getHeader(AUTH_HEADER);
                 if (!StringUtils.hasText(authorization)) {
-                    writeError(response, HttpStatus.UNAUTHORIZED.value(), "Unauthorized");
+                    writeError(response, HttpStatus.UNAUTHORIZED.value(), "请先登录");
                     return;
                 }
                 try {
@@ -58,7 +58,7 @@ public class AuthContextFilter extends OncePerRequestFilter {
                     if (passwordChangeRequiredService.isRequired(userId)
                             && !"/api/users/me".equals(path)
                             && !"/api/auth/me".equals(path)) {
-                        writeError(response, HttpStatus.FORBIDDEN.value(), "Password change required");
+                        writeError(response, HttpStatus.FORBIDDEN.value(), "请先修改初始密码");
                         return;
                     }
                 } catch (ResponseStatusException ex) {

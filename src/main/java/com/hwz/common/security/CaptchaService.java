@@ -46,15 +46,15 @@ public class CaptchaService {
 
     public void verify(String captchaId, String captchaCode) {
         if (!StringUtils.hasText(captchaId) || !StringUtils.hasText(captchaCode)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Captcha is required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请输入验证码");
         }
         CaptchaEntry entry = captchas.remove(captchaId);
         if (entry == null || entry.expiresAt.isBefore(Instant.now())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Captcha expired");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "验证码已过期，请刷新后重试");
         }
         String submitted = captchaCode.trim().toUpperCase(Locale.ROOT);
         if (!entry.code.equals(submitted)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Captcha is incorrect");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "验证码错误，请重新输入");
         }
     }
 
@@ -94,7 +94,7 @@ public class CaptchaService {
             ImageIO.write(image, "png", outputStream);
             return "data:image/png;base64," + Base64.getEncoder().encodeToString(outputStream.toByteArray());
         } catch (Exception ex) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Captcha generation failed");
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "验证码生成失败，请稍后重试");
         }
     }
 

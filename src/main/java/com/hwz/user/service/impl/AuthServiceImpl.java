@@ -52,7 +52,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public LoginResponse login(LoginRequest req) {
         if (req == null || !StringUtils.hasText(req.getUsername()) || !StringUtils.hasText(req.getPassword())) {
-            throw new IllegalArgumentException("Username and password are required");
+            throw new IllegalArgumentException("请输入用户名和密码");
         }
 
         User user = userMapper.selectOne(
@@ -62,7 +62,7 @@ public class AuthServiceImpl implements AuthService {
         );
 
         if (user == null || !PasswordSupport.matches(passwordEncoder, req.getPassword(), user.getPassword())) {
-            throw new IllegalArgumentException("Invalid username or password");
+            throw new IllegalArgumentException("用户名或密码错误");
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -87,11 +87,11 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public LoginResponse register(RegisterRequest req) {
         if (req == null || !StringUtils.hasText(req.getUsername()) || !StringUtils.hasText(req.getPassword())) {
-            throw new IllegalArgumentException("Username and password are required");
+            throw new IllegalArgumentException("请输入用户名和密码");
         }
         validatePasswordStrength(req.getPassword());
         if (StringUtils.hasText(req.getConfirmPassword()) && !req.getPassword().equals(req.getConfirmPassword())) {
-            throw new IllegalArgumentException("Password confirmation does not match");
+            throw new IllegalArgumentException("两次输入的密码不一致");
         }
 
         User existing = userMapper.selectOne(
@@ -100,7 +100,7 @@ public class AuthServiceImpl implements AuthService {
                         .last("LIMIT 1")
         );
         if (existing != null) {
-            throw new IllegalArgumentException("Registration failed");
+            throw new IllegalArgumentException("用户名已存在，请更换后重试");
         }
 
         String displayName = StringUtils.hasText(req.getRealName()) ? req.getRealName() : req.getUsername();
@@ -127,7 +127,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public TokenResponse refreshToken(RefreshTokenRequest req) {
         if (req == null || !StringUtils.hasText(req.getRefreshToken())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token is required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录状态已失效，请重新登录");
         }
 
         RefreshToken token = refreshTokenMapper.selectOne(
@@ -139,12 +139,12 @@ public class AuthServiceImpl implements AuthService {
 
         LocalDateTime now = LocalDateTime.now();
         if (token == null || token.getExpiresAt() == null || token.getExpiresAt().isBefore(now)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token expired");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录状态已过期，请重新登录");
         }
         if (token.getCreatedAt() != null && token.getCreatedAt().plusDays(REFRESH_DAYS).isBefore(now)) {
             token.setRevokedAt(now);
             refreshTokenMapper.updateById(token);
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token expired");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录状态已过期，请重新登录");
         }
 
         String accessToken = accessTokenService.issue(token.getUserId());
@@ -166,7 +166,7 @@ public class AuthServiceImpl implements AuthService {
         Long userId = accessTokenService.verifyAndGetUserId(authorization);
         User user = userMapper.selectById(userId);
         if (user == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户不存在，请重新登录");
         }
         return UserInfoResponse.from(user);
     }
@@ -187,9 +187,9 @@ public class AuthServiceImpl implements AuthService {
     private void validatePasswordStrength(String password) {
         if (!isStrongPassword(password)) {
             if (password == null || password.length() < MIN_PASSWORD_LENGTH) {
-                throw new IllegalArgumentException("Password must be at least 12 characters");
+                throw new IllegalArgumentException("密码长度至少需要 12 位");
             }
-            throw new IllegalArgumentException("Password must contain uppercase letters, lowercase letters, numbers, and special characters");
+            throw new IllegalArgumentException("密码需包含大写字母、小写字母、数字和特殊字符");
         }
     }
 

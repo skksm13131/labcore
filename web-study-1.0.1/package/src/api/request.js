@@ -11,6 +11,12 @@ const request = axios.create({
   }
 })
 
+const getResponseMessage = (data, fallback = '请求失败，请稍后重试') => {
+  return data?.message || data?.error?.message || fallback
+}
+
+const rejectWithMessage = (message) => Promise.reject(new Error(message))
+
 request.interceptors.request.use(
   config => {
     const token = localStorage.getItem('token')
@@ -30,8 +36,9 @@ request.interceptors.response.use(
       if (res.success) {
         return res.data !== undefined ? res.data : res
       }
-      ElMessage.error(res.message || res.error?.message || 'Request failed')
-      return Promise.reject(new Error(res.message || res.error?.message))
+      const message = getResponseMessage(res)
+      ElMessage.error(message)
+      return rejectWithMessage(message)
     }
 
     return res
@@ -40,13 +47,26 @@ request.interceptors.response.use(
     const { response } = error
 
     if (!response) {
-      ElMessage.error('Network error. Please check your connection.')
-      return Promise.reject(error)
+      const message = '网络异常，请检查连接后重试'
+      ElMessage.error(message)
+      return rejectWithMessage(message)
     }
 
     const { status, data } = response
 
     if (status === 401) {
+      const requestUrl = error.config?.url || ''
+      const isAuthRequest = requestUrl.includes('/auth/login')
+        || requestUrl.includes('/auth/register')
+        || requestUrl.includes('/auth/refresh')
+        || requestUrl.includes('/auth/captcha')
+
+      if (isAuthRequest) {
+        const message = getResponseMessage(data, '用户名、密码或验证码不正确')
+        ElMessage.error(message)
+        return rejectWithMessage(message)
+      }
+
       const authStore = useAuthStore()
 
       try {
@@ -59,30 +79,40 @@ request.interceptors.response.use(
         return request(config)
       } catch (refreshError) {
         authStore.logout()
-        ElMessage.error('Session expired. Please log in again.')
+        const message = '登录状态已过期，请重新登录'
+        ElMessage.error(message)
         window.location.href = '/login'
-        return Promise.reject(refreshError)
+        return rejectWithMessage(message)
       }
     }
 
     if (status === 403) {
-      ElMessage.error('Access denied.')
-      return Promise.reject(error)
+      const message = getResponseMessage(data, '无权访问该资源')
+      ElMessage.error(message)
+      return rejectWithMessage(message)
     }
 
     if (status === 404) {
-      ElMessage.error('Resource not found.')
-      return Promise.reject(error)
+      const message = getResponseMessage(data, '请求的资源不存在')
+      ElMessage.error(message)
+      return rejectWithMessage(message)
+    }
+
+    if (status === 413) {
+      const message = getResponseMessage(data, '文件过大，请重新选择文件')
+      ElMessage.error(message)
+      return rejectWithMessage(message)
     }
 
     if (status >= 500) {
-      ElMessage.error('Server error. Please try again later.')
-      return Promise.reject(error)
+      const message = getResponseMessage(data, '服务器异常，请稍后重试')
+      ElMessage.error(message)
+      return rejectWithMessage(message)
     }
 
-    const message = data?.message || data?.error?.message || 'Request failed'
+    const message = getResponseMessage(data)
     ElMessage.error(message)
-    return Promise.reject(error)
+    return rejectWithMessage(message)
   }
 )
 

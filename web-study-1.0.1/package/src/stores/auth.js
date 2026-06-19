@@ -53,7 +53,6 @@ export const useAuthStore = defineStore('auth', {
         ElMessage.success('登录成功')
         return true
       } catch (error) {
-        ElMessage.error(error.message || '登录失败')
         return false
       }
     },
@@ -79,7 +78,6 @@ export const useAuthStore = defineStore('auth', {
         ElMessage.success('注册成功')
         return true
       } catch (error) {
-        ElMessage.error(error.message || '注册失败')
         return false
       }
     },

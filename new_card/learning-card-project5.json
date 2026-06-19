@@ -1,0 +1,88 @@
+{
+  "title": "Multi-Agent — 多智能体分工协作系统",
+  "summary": "从单智能体的局限性出发，讲解多智能体系统的核心思想：让多个专业 AI 角色分工合作。深入理解角色定义、消息传递、协作流程三个核心要素，系统掌握串行流水线、辩论模式、主从模式三种经典协作架构的实现方法与适用场景，探讨智能体间上下文传递设计与错误传播问题。",
+  "category": "智能体高级应用",
+  "difficulty": "极难",
+  "duration": "3.5小时",
+  "prerequisites": "项目一至四完成（掌握 Prompt、Tool Use、Memory、Code Sandbox）",
+  "objectives": [
+    "理解单智能体在复杂任务中的局限性以及多智能体的优势",
+    "掌握多智能体系统的三个核心要素：角色定义、消息传递、协作流程编排",
+    "能够设计智能体的角色分工与 System Prompt，定义清晰的输入输出接口",
+    "实现串行流水线、辩论模式、主从模式三种协作架构",
+    "理解智能体间上下文传递的设计方法与错误传播问题",
+    "掌握多智能体系统的设计原则与最佳实践"
+  ],
+  "features": [
+    {
+      "title": "角色分工机制",
+      "description": "每个智能体有独立的身份、职责和 System Prompt，专注单一任务比'全能选手'更可靠。角色定义的质量直接决定协作效果。"
+    },
+    {
+      "title": "消息传递与上下文设计",
+      "description": "智能体之间通过'消息'通信，一个智能体的输出作为另一个智能体的输入。上下文传递的格式设计是系统可靠性的关键。"
+    },
+    {
+      "title": "协作流程编排",
+      "description": "定义智能体的执行顺序和数据流向，包括串行流水线、辩论模式、主从模式等多种架构及其组合。"
+    }
+  ],
+  "steps": [
+    {
+      "stepNo": 1,
+      "title": "理解单智能体的局限性",
+      "description": "单个智能体在处理复杂任务时面临三个核心问题：\n\n1. 角色混乱（Role Confusion）：一个模型又要写文案、又要写代码、又要审核，容易'分心'。System Prompt 越长、要求越多，模型的遵循度越低。实验表明，当 System Prompt 超过 1000 token 时，模型对后期指令的遵循度明显下降。\n\n2. 质量下降（Quality Degradation）：没有'第二双眼睛'检查，错误容易被忽略。单智能体生成的代码没有 review 环节，生成的文案没有校对环节。\n\n3. 难以扩展（Scalability）：任务越复杂，单个 Prompt 越难覆盖所有需求。如果要同时处理需求分析、代码生成、测试编写、文档撰写，一个 Prompt 几乎不可能做好所有事情。\n\n多智能体的核心思想是'分而治之'（Divide and Conquer）——就像一家公司有产品经理、程序员、测试员分工协作。每个智能体专注一个角色，System Prompt 更短更精准，输出质量更高。此外，多智能体系统更容易扩展——新增一个角色只需定义一个新的 Agent 实例，不影响现有角色。",
+      "tip": "多智能体不是万能的——简单任务用单智能体更高效（省去了多次 API 调用的延迟和费用）。只有当任务足够复杂、需要多种专业能力时，多智能体的优势才显现。判断标准：如果一个 System Prompt 超过 500 token 还不能清晰描述任务，就该考虑拆分了。",
+      "code": ""
+    },
+    {
+      "stepNo": 2,
+      "title": "设计智能体基类与角色定义",
+      "description": "多智能体系统有三个核心要素：\n\n1. 角色（Role）：每个智能体有自己的身份、职责和 System Prompt。角色定义应包含：身份描述（你是谁）、能力范围（你能做什么）、输出要求（你的输出格式是什么）、边界约束（你不做什么）。\n\n2. 消息传递（Message Passing）：智能体之间通过'消息'通信。一个智能体的输出被格式化为另一个智能体的输入。消息格式的设计至关重要——如果上游输出的格式不符合下游的期望，整个链路就会断裂。\n\n3. 协作流程（Workflow）：定义智能体的执行顺序和数据流向。如'需求→开发→审核→交付'就是一个串行流程。\n\n首先设计一个通用的 Agent 基类，封装 API 调用逻辑。每个具体角色通过不同的 name 和 system_prompt 来实例化。基类的 run() 方法接收任务文本，返回结果文本。",
+      "tip": "设计多智能体系统时，先明确任务流程中有哪些'角色'，再定义每个角色的输入输出接口（格式和内容），最后编排执行顺序。接口定义比实现更重要。",
+      "code": "class Agent:\n    \"\"\"通用智能体基类\"\"\"\n    \n    def __init__(self, name, system_prompt, temperature=0.7):\n        self.name = name\n        self.system_prompt = system_prompt\n        self.temperature = temperature\n    \n    def run(self, task):\n        \"\"\"接收任务，返回结果\"\"\"\n        print(f\"  [{self.name}] 正在处理...\")\n        response = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=[\n                {\"role\": \"system\", \"content\": self.system_prompt},\n                {\"role\": \"user\", \"content\": task}\n            ],\n            temperature=self.temperature\n        )\n        result = response.choices[0].message.content\n        print(f\"  [{self.name}] 完成。\")\n        return result\n    \n    def run_with_history(self, task, history=None):\n        \"\"\"支持传入历史消息的增强版本\"\"\"\n        messages = [{\"role\": \"system\", \"content\": self.system_prompt}]\n        if history:\n            messages.extend(history)\n        messages.append({\"role\": \"user\", \"content\": task})\n        \n        response = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=messages,\n            temperature=self.temperature\n        )\n        return response.choices[0].message.content"
+    },
+    {
+      "stepNo": 3,
+      "title": "实现串行流水线模式",
+      "description": "串行流水线是最基础的多智能体协作模式：A → B → C，依次处理，上游输出是下游输入。\n\n典型场景是软件开发流水线：用户想法 → 产品经理（拆解需求） → 程序员（编写代码） → 输出结果。每个智能体的 System Prompt 要精确定义其职责和输出格式——产品经理输出结构化的需求文档（Markdown 格式），程序员根据需求文档编写代码。\n\n流水线设计的关键是'接口对齐'：上游的输出格式必须与下游的期望输入匹配。如果产品经理输出的需求文档格式不固定，程序员解析起来就很困难。解决方法是在 System Prompt 中明确定义输出格式，甚至给出输出模板。\n\n流水线的质量瓶颈通常在第一个环节——如果产品经理的需求文档不清晰，后续所有环节都会受影响（'垃圾进，垃圾出'）。因此第一个环节的 System Prompt 要最精心设计。",
+      "tip": "串行流水线中'上游影响下游'。一个实用的调试技巧：先单独测试每个智能体（给固定输入，检查输出是否符合预期），再串联起来测试整个流水线。",
+      "code": "# 产品经理：负责拆解需求\npm_agent = Agent(\n    name=\"产品经理\",\n    system_prompt=\"\"\"你是一个资深产品经理。你的职责是：\n1. 接收用户的产品想法\n2. 分析核心需求，拆解为具体的功能点\n3. 输出一份结构化的技术需求文档\n\n输出格式（严格遵守）：\n## 产品概述\n（一句话描述）\n\n## 核心功能\n1. 功能1：描述\n2. 功能2：描述\n\n## 技术方案\n- 编程语言：\n- 关键算法：\n\n## 输入输出示例\n- 输入：xxx\n- 输出：xxx\"\"\",\n    temperature=0.5\n)\n\n# 程序员：负责根据需求文档编写代码\ndev_agent = Agent(\n    name=\"程序员\",\n    system_prompt=\"\"\"你是一个 Python 编程专家。你的职责是：\n1. 接收产品经理的需求文档\n2. 根据文档中的功能列表，编写完整的 Python 代码\n3. 代码要有清晰的函数/类结构\n4. 包含测试用例（用 print 输出结果）\n5. 只返回代码（用 ```python 包裹）\"\"\",\n    temperature=0.3\n)\n\n# 流水线\ndef software_pipeline(user_idea):\n    \"\"\"串行流水线：需求 → 开发\"\"\"\n    print(\"=\" * 50)\n    print(f\"用户需求：{user_idea}\")\n    print(\"=\" * 50)\n    \n    # 1. 产品经理拆解需求\n    print(\"\\n[阶段 1] 需求分析\")\n    spec_doc = pm_agent.run(user_idea)\n    print(f\"\\n需求文档：\\n{spec_doc}\\n\")\n    \n    # 2. 程序员根据需求文档编写代码\n    print(\"[阶段 2] 代码开发\")\n    code_result = dev_agent.run(f\"请根据以下需求文档编写代码：\\n\\n{spec_doc}\")\n    print(f\"\\n代码结果：\\n{code_result}\\n\")\n    \n    return spec_doc, code_result"
+    },
+    {
+      "stepNo": 4,
+      "title": "实现辩论模式",
+      "description": "辩论模式适用于需要多角度分析的问题：两个智能体分别扮演正方和反方，进行多轮交锋，最后由'裁判'智能体总结。\n\n与串行流水线不同，辩论模式的数据流是双向的（A ↔ B）。每个智能体需要看到对方的论点才能进行有针对性的反驳。实现关键是维护一个 debate_history 变量，记录所有发言，让每轮辩论都能参考之前的内容。\n\n辩论模式的设计要点：\n1. 第一轮是'立论'，各方独立阐述自己的观点；后续轮是'反驳'，需要针对对方的具体论点进行回应。\n2. 裁判不参与辩论，只看到完整记录后做最终评审。裁判的 System Prompt 应强调'客观公正'和'综合评价'。\n3. 辩论轮数不宜过多（2-3 轮足够），否则容易陷入重复论证。\n\n辩论模式的价值在于'对抗性思考'——通过让模型扮演对立角色，可以发现单向思考容易忽略的问题和漏洞。这在学术讨论、方案评审、决策分析等场景中特别有用。",
+      "tip": "辩论模式中，正反方的 System Prompt 应有足够的'立场坚定性'——明确告诉它'你必须为正方/反方辩护，即使你个人不这么认为'，否则模型可能很快'倒戈'。",
+      "code": "for_agent = Agent(\n    name=\"正方\",\n    system_prompt=\"\"\"你是正方辩手。你必须为辩题进行正面论证。\n要求：\n1. 论点清晰，有逻辑性\n2. 用事实和数据支撑\n3. 每轮发言控制在 200 字以内\n4. 后续轮次必须针对反方的具体论点进行反驳\"\"\",\n    temperature=0.8\n)\n\nagainst_agent = Agent(\n    name=\"反方\",\n    system_prompt=\"\"\"你是反方辩手。你必须为辩题进行反面论证。\n要求：\n1. 论点清晰，有逻辑性\n2. 用事实和数据支撑\n3. 每轮发言控制在 200 字以内\n4. 后续轮次必须针对正方的具体论点进行反驳\"\"\",\n    temperature=0.8\n)\n\njudge_agent = Agent(\n    name=\"裁判\",\n    system_prompt=\"\"\"你是辩论赛的裁判。请客观评价双方的论点。\n输出格式：\n1. 正方主要论点及评价\n2. 反方主要论点及评价\n3. 综合判断：哪方论证更有说服力，为什么\n4. 最终结论\"\"\",\n    temperature=0.3\n)\n\n\ndef debate(topic, rounds=2):\n    \"\"\"辩论模式：正反方交锋 + 裁判总结\"\"\"\n    print(f\"辩题：{topic}\\n\")\n    debate_history = f\"辩题：{topic}\\n\"\n    \n    for i in range(1, rounds + 1):\n        print(f\"--- 第 {i} 轮辩论 ---\")\n        \n        # 正方发言\n        if i == 1:\n            for_input = f\"辩题是：{topic}。请作为正方进行立论。\"\n        else:\n            for_input = f\"辩题是：{topic}。\\n\\n之前的辩论记录：\\n{debate_history}\\n\\n请针对反方的观点进行反驳。\"\n        \n        for_statement = for_agent.run(for_input)\n        debate_history += f\"\\n【正方第{i}轮】\\n{for_statement}\\n\"\n        print(f\"正方：{for_statement[:80]}...\")\n        \n        # 反方发言\n        against_input = f\"辩题是：{topic}。\\n\\n之前的辩论记录：\\n{debate_history}\\n\\n请针对正方的观点进行反驳。\"\n        against_statement = against_agent.run(against_input)\n        debate_history += f\"\\n【反方第{i}轮】\\n{against_statement}\\n\"\n        print(f\"反方：{against_statement[:80]}...\")\n    \n    # 裁判总结\n    print(\"\\n--- 裁判评审 ---\")\n    verdict = judge_agent.run(f\"以下是完整的辩论记录：\\n{debate_history}\\n\\n请进行评审总结。\")\n    print(f\"\\n裁判结论：{verdict}\")\n    return verdict"
+    },
+    {
+      "stepNo": 5,
+      "title": "实现主从模式与投票模式",
+      "description": "主从模式（Master-Worker）：一个'主管'智能体负责分析任务并分配给多个'下属'智能体，下属各自完成后向主管汇报，主管汇总输出。\n\n主从模式适用于可以并行分解的任务（如同时分析多个维度）。主管的 System Prompt 需要定义任务分解策略和汇总格式。下属之间互不通信，只与主管交互。\n\n投票模式（Voting）：多个智能体各自独立回答同一问题，通过某种机制选出最优答案。常见投票策略：多数投票（选出现次数最多的答案）、评分投票（每个智能体给所有答案打分，选最高分）。投票模式适用于需要高可靠性的决策——单个模型可能出错，但多个独立模型同时犯同样错误的概率很低。\n\n选择协作模式的依据：有明确先后顺序用流水线，需要多角度分析用辩论，需要并行处理用主从，需要高可靠性用投票。",
+      "tip": "投票模式中的'多样性'很重要——如果用相同的 temperature 和相同的 System Prompt，多个智能体可能给出高度相似的答案，投票就失去了意义。应该让各智能体有不同的 temperature 或不同的角色视角。",
+      "code": "# 主从模式\ndef master_worker_pipeline(task, worker_prompts):\n    \"\"\"主从模式：主管分配任务，下属各自完成，主管汇总\"\"\"\n    master = Agent(name=\"主管\", system_prompt=\"\"\"你是项目主管。请将以下任务分解为子任务，\n分配给不同的团队成员。输出格式：\n【成员1-任务名】具体任务描述\n【成员2-任务名】具体任务描述\"\"\",\n        temperature=0.5)\n    \n    # 1. 主管分解任务\n    print(\"[主管] 分解任务...\")\n    assignments = master.run(task)\n    print(f\"任务分配：\\n{assignments}\\n\")\n    \n    # 2. 各下属独立完成任务\n    results = []\n    for i, worker_prompt in enumerate(worker_prompts):\n        worker = Agent(name=f\"成员{i+1}\", system_prompt=worker_prompt, temperature=0.5)\n        result = worker.run(f\"请完成以下任务：\\n{task}\\n\\n你的具体分工见主管分配：\\n{assignments}\")\n        results.append(result)\n        print(f\"[成员{i+1}] 完成\\n\")\n    \n    # 3. 主管汇总\n    combined = \"\\n\\n\".join([f\"成员{i+1}的结果：\\n{r}\" for i, r in enumerate(results)])\n    final = master.run(f\"以下是各成员的工作结果：\\n{combined}\\n\\n请汇总为最终报告。\")\n    return final\n\n\n# 投票模式\ndef voting_agent(question, num_voters=3):\n    \"\"\"投票模式：多个智能体独立回答，选最优\"\"\"\n    voters = []\n    for i in range(num_voters):\n        voter = Agent(\n            name=f\"投票者{i+1}\",\n            system_prompt=f\"你是一个独立思考的顾问（视角{i+1}）。请独立回答问题，给出你的答案和理由。\",\n            temperature=0.5 + i * 0.2  # 不同 temperature 增加多样性\n        )\n        voters.append(voter)\n    \n    # 各自独立回答\n    answers = [voter.run(question) for voter in voters]\n    \n    # 用裁判智能体评选最优\n    judge = Agent(name=\"裁判\", system_prompt=\"\"\"请评价以下多个独立回答，选出最佳答案。\n输出格式：\n最佳回答编号：X\n理由：...\n最终答案：综合所有回答给出最佳答案\"\"\",\n        temperature=0.3)\n    \n    combined_answers = \"\\n\\n\".join([f\"回答{i+1}：\\n{a}\" for i, a in enumerate(answers)])\n    verdict = judge.run(f\"问题：{question}\\n\\n{combined_answers}\")\n    return verdict"
+    },
+    {
+      "stepNo": 6,
+      "title": "智能体间上下文传递设计",
+      "description": "多智能体系统中，智能体之间的上下文传递是一个容易被忽视但极其重要的设计问题。\n\n核心挑战：每个智能体只看到自己的 System Prompt 和收到的消息，它不知道其他智能体的存在，也不知道整个系统的目标。因此，传递的消息必须包含足够的上下文信息。\n\n设计原则：\n1. 自包含（Self-contained）：每条消息应包含接收方完成任务所需的全部信息，不要假设接收方'已经知道'什么。\n2. 格式明确：使用结构化格式（如 Markdown 标题、编号列表）组织传递内容，便于接收方解析。\n3. 角色透明：在消息中说明'这条消息来自谁'（如'以下是产品经理的需求文档：'），帮助接收方理解上下文。\n4. 信息过滤：不要传递无关信息。如果流水线有 5 个环节，第 3 个环节不需要看到第 1 个环节的所有细节——只传递它需要的部分。\n\n在辩论模式中，上下文传递更复杂——每个智能体需要看到完整的历史记录。但历史记录会随轮次增长，需要控制长度（如只保留最近 2 轮的发言）。",
+      "tip": "一个实用的检验方法：把传递给下游智能体的消息单独拿出来，给一个完全不了解系统的人看，他能否理解任务要求？如果不能，说明上下文不够。",
+      "code": "# 上下文传递的好 vs 坏示例\n\n# 坏的传递：信息不足\nbad_handoff = \"请根据需求写代码\"  # 程序员不知道需求是什么\n\n# 好的传递：自包含、格式明确\ngood_handoff = \"\"\"以下是产品经理整理的需求文档：\n\n## 产品概述\n开发一个命令行计算器工具\n\n## 核心功能\n1. 支持加减乘除四则运算\n2. 支持括号优先级\n3. 支持小数运算\n\n请根据以上需求编写 Python 代码。\"\"\"\n\n\n# 带上下文的流水线\ndef pipeline_with_context(user_idea):\n    \"\"\"带完整上下文传递的流水线\"\"\"\n    # 1. 产品经理\n    spec = pm_agent.run(user_idea)\n    \n    # 2. 传递给程序员时，包含完整上下文\n    dev_task = f\"\"\"你是程序员，负责根据产品经理的需求文档编写代码。\n\n以下是产品经理的需求文档：\n{spec}\n\n请编写完整的 Python 代码实现以上需求。\"\"\"\n    code = dev_agent.run(dev_task)\n    \n    return spec, code"
+    },
+    {
+      "stepNo": 7,
+      "title": "错误传播与恢复机制",
+      "description": "多智能体系统中的一个严重问题是错误传播（Error Propagation）：上游智能体的错误会沿着流水线放大。\n\n例如：产品经理误解了用户需求（错误1） → 程序员根据错误需求写了错误的代码（错误2） → 最终产出完全偏离用户期望。每一步的错误不是简单的叠加，而是可能被放大。\n\n应对策略：\n1. 中间检查点：在流水线的关键环节加入'审核'智能体，检查上游输出是否合理。如产品经理输出需求后，先让一个'技术顾问'审核需求的可行性，再传给程序员。\n2. 反馈回路：下游发现问题时，可以将问题反馈给上游重新处理。如程序员发现需求文档有歧义，可以要求产品经理澄清。\n3. 异常处理：每个智能体的 run() 方法应包含错误处理，避免一个智能体出错导致整个系统崩溃。\n4. 超时保护：为每个智能体设置超时，避免某个环节卡住导致整个流水线停滞。\n\n在实际系统中，错误恢复的成本（额外的 API 调用）需要与产出质量之间取得平衡。",
+      "tip": "设计多智能体系统时，建议先实现最简单的两智能体协作，验证流程后再增加更多角色。每增加一个角色，系统的复杂度和出错概率都会增加。",
+      "code": "class RobustAgent(Agent):\n    \"\"\"带错误处理的健壮智能体\"\"\"\n    \n    def run(self, task, timeout_retries=2):\n        for attempt in range(timeout_retries):\n            try:\n                print(f\"  [{self.name}] 第 {attempt+1} 次尝试...\")\n                response = client.chat.completions.create(\n                    model=\"deepseek-chat\",\n                    messages=[\n                        {\"role\": \"system\", \"content\": self.system_prompt},\n                        {\"role\": \"user\", \"content\": task}\n                    ],\n                    temperature=self.temperature\n                )\n                result = response.choices[0].message.content\n                \n                # 检查输出是否为空或过短\n                if not result or len(result) < 10:\n                    print(f\"  [{self.name}] 输出过短，重试...\")\n                    continue\n                \n                return result\n            except Exception as e:\n                print(f\"  [{self.name}] 出错: {e}\")\n                if attempt == timeout_retries - 1:\n                    return f\"[{self.name}] 处理失败: {e}\"\n        return f\"[{self.name}] 多次重试后仍失败\"\n\n\ndef pipeline_with_review(user_idea):\n    \"\"\"带审核环节的流水线\"\"\"\n    # 1. 产品经理\n    spec = pm_agent.run(user_idea)\n    \n    # 2. 审核员检查需求文档\n    reviewer = RobustAgent(name=\"审核员\",\n        system_prompt=\"\"\"你是技术审核员。请检查以下需求文档：\n1. 需求是否清晰明确？\n2. 功能列表是否完整？\n3. 是否有歧义或遗漏？\n\n如果通过审核，输出：【通过】\n如果有问题，输出：【修改建议】+ 具体建议\"\"\",\n        temperature=0.3)\n    \n    review = reviewer.run(f\"请审核以下需求文档：\\n{spec}\")\n    \n    if \"【通过】\" in review:\n        # 3. 审核通过，继续流水线\n        code = dev_agent.run(f\"请根据以下需求编写代码：\\n{spec}\")\n        return spec, code\n    else:\n        # 4. 审核未通过，让产品经理修改\n        print(f\"审核意见：{review}\")\n        revised_spec = pm_agent.run(f\"原始需求：\\n{spec}\\n\\n审核意见：{review}\\n\\n请根据审核意见修改需求文档。\")\n        code = dev_agent.run(f\"请根据以下需求编写代码：\\n{revised_spec}\")\n        return revised_spec, code"
+    },
+    {
+      "stepNo": 8,
+      "title": "多智能体设计原则与最佳实践",
+      "description": "设计多智能体系统应遵循以下原则：\n\n1. 单一职责（Single Responsibility）：每个智能体只负责一件事。System Prompt 要精准定义角色边界，避免一个智能体承担过多职责。判断标准：能否用一句话描述这个智能体的职责？如果不能，说明职责太宽泛。\n\n2. 明确接口（Clear Interfaces）：定义清楚每个智能体的输入格式和输出格式，确保上下游能正确对接。接口定义应包含：输入是什么（文本？JSON？代码？）、输出格式是什么（Markdown？纯文本？代码块？）、输出的长度限制。\n\n3. 错误隔离（Error Isolation）：一个智能体出错不应导致整个系统崩溃。在每个智能体的 run() 方法中加入异常处理，返回有意义的错误信息。\n\n4. 可观测性（Observability）：记录每个智能体的输入输出，便于调试和优化。在 run() 方法中打印日志，或将中间结果保存到文件。\n\n5. 渐进式扩展（Incremental Scaling）：先实现最简单的两个智能体协作，验证流程后再增加更多角色。每增加一个角色，都要单独测试它的输入输出是否符合预期。\n\n6. 成本意识（Cost Awareness）：多智能体意味着多次 API 调用。3 个智能体的流水线至少需要 3 次 API 调用（可能更多，如果有审核/重试环节）。在设计时要考虑 token 消耗和延迟。",
+      "tip": "多智能体系统的调试比单智能体复杂得多。建议：(1) 每个智能体单独测试；(2) 在 run() 方法中打印详细的中间结果；(3) 用固定的测试用例验证整个流水线；(4) 记录每次调用的 token 消耗用于成本分析。",
+      "code": "# 完整的多智能体系统示例：带日志记录\nclass LoggedAgent(Agent):\n    \"\"\"带日志记录的智能体\"\"\"\n    \n    def __init__(self, name, system_prompt, log_file=\"agent_log.txt\"):\n        super().__init__(name, system_prompt)\n        self.log_file = log_file\n    \n    def run(self, task):\n        print(f\"\\n{'='*40}\")\n        print(f\"[{self.name}] 收到任务:\")\n        print(f\"  输入: {task[:100]}...\")\n        \n        result = super().run(task)\n        \n        print(f\"  输出: {result[:100]}...\")\n        print(f\"{'='*40}\\n\")\n        \n        # 记录日志\n        with open(self.log_file, \"a\", encoding=\"utf-8\") as f:\n            f.write(f\"\\n[{self.name}]\\n输入: {task}\\n输出: {result}\\n\")\n        \n        return result\n\n\n# 使用示例\nprint(\"=== 多智能体协作系统 ===\")\nprint(\"角色: 产品经理 → 审核员 → 程序员\")\n\nresult = pipeline_with_review(\"做一个命令行计算器，支持加减乘除\")\nprint(f\"\\n最终产出:\\n{result[1]}\")"
+    }
+  ]
+}

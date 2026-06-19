@@ -13,8 +13,13 @@ logging.level.com.hwz=INFO
 
 server.address=0.0.0.0
 labcore.learning.template-storage-dir=data/learning-templates
+labcore.assignment.upload-dir=data/assignment-submissions
+labcore.assignment.material-dir=data/assignment-materials
+spring.servlet.multipart.max-file-size=300MB
+spring.servlet.multipart.max-request-size=330MB
 labcore.auth.access-token-secret=CHANGE_ME_TO_A_LONG_RANDOM_SECRET
 labcore.auth.access-token-ttl-seconds=7200
+labcore.admin.default-password=Admin@12345678
 spring.jackson.deserialization.fail-on-unknown-properties=false
 server.error.include-stacktrace=never
 server.error.include-message=never

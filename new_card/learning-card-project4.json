@@ -1,0 +1,88 @@
+{
+  "title": "Code Sandbox — 让智能体自己写代码、自己执行",
+  "summary": "从 Code Interpreter 的核心原理出发，系统讲解如何让大模型生成代码、在沙箱中执行、捕获输出并返回模型。深入理解 exec() 与 eval() 的区别、io.StringIO 输出捕获机制、正则代码提取、自我修正循环的实现，以及代码执行超时控制与生产环境安全隔离方案。",
+  "category": "智能体核心能力",
+  "difficulty": "困难",
+  "duration": "3.5小时",
+  "prerequisites": "项目一完成（掌握 API 调用）、Python 基础（了解 exec/eval 概念、异常处理）",
+  "objectives": [
+    "理解 Code Sandbox 的核心思想：模型写代码 → 系统执行 → 结果回传",
+    "掌握 Python 的 exec() 和 io.StringIO 实现代码执行与输出捕获",
+    "能够用正则表达式从模型回复中精确提取代码块",
+    "实现带自我修正的代码智能体，理解错误反馈循环的工作机制",
+    "掌握代码执行超时控制方法",
+    "理解生产环境中代码沙箱的安全隔离要求与实现方案"
+  ],
+  "features": [
+    {
+      "title": "代码执行与输出捕获",
+      "description": "使用 exec() 执行字符串代码，通过 io.StringIO 重定向 sys.stdout 来捕获 print 输出，实现代码执行结果的程序化获取。"
+    },
+    {
+      "title": "代码提取与格式化",
+      "description": "使用正则表达式从模型返回的自然语言+代码混合内容中精确提取代码块，处理多种格式变体。"
+    },
+    {
+      "title": "自我修正与安全隔离",
+      "description": "当代码执行出错时将错误信息返回给模型进行修正，同时理解生产环境中沙箱隔离的必要性。"
+    }
+  ],
+  "steps": [
+    {
+      "stepNo": 1,
+      "title": "理解 Code Sandbox 的核心思想",
+      "description": "Code Sandbox 的本质是让大模型变成程序员：写代码 → 执行 → 看结果 → 有问题就改。这个流程模拟了人类程序员的日常工作方式。\n\n与直接让模型回答相比，代码执行有三大优势：\n1. 计算结果 100% 准确：模型可能算错 1234×5678（因为它在'猜'下一个 token），但 Python 代码的乘法运算不会出错。\n2. 能处理真实数据：CSV 解析、JSON 处理、数据库查询等，模型可以直接操作真实世界的数据格式。\n3. 可复现可验证：代码是确定性的，同样的输入产生同样的输出，结果可以被第三方验证。\n\n从架构角度看，Code Sandbox 是 Tool Use 的一个特例——'代码执行器'本身就是一个工具。区别在于：普通工具（如天气查询）是预定义的固定函数，而代码执行器能执行模型动态生成的任意代码，灵活性更高。\n\n这个流程涉及三个关键环节：代码生成（模型根据任务写代码）、代码执行（在受控环境中运行）、结果反馈（把输出或错误返回给模型）。",
+      "tip": "Code Sandbox 是 OpenAI Code Interpreter 功能的核心原理。ChatGPT 的'数据分析'功能就是让你在对话框里上传 CSV，它在后台用 Python 处理——本质上就是一个 Code Sandbox。",
+      "code": ""
+    },
+    {
+      "stepNo": 2,
+      "title": "掌握 exec() 与 eval() 的区别",
+      "description": "Python 提供了两个内置函数来动态执行代码字符串：\n\nexec(code_string)：执行一段代码语句，可以包含任意 Python 语句（赋值、循环、函数定义、类定义等）。exec() 的返回值始终是 None，它的效果体现在对命名空间的修改（如定义了新变量）和副作用（如 print 输出）。\n\neval(expression)：只执行单个表达式，并返回表达式的值。如 eval('2+3') 返回 5。eval() 不能包含赋值语句、循环等复杂语句。\n\n对于 Code Sandbox，我们需要 exec()，因为模型生成的代码通常包含多行语句、变量赋值、函数定义等。exec() 有两个可选参数：globals（全局命名空间字典）和 locals（局部命名空间字典），可以控制代码执行时可访问的变量和函数。\n\n重要安全提示：exec() 执行的代码拥有与主程序相同的权限，可以访问所有变量、导入模块、读写文件。这就是为什么生产环境需要沙箱隔离。",
+      "tip": "exec() 的 globals 参数可以用来限制代码能使用的内置函数。例如 exec(code, {'__builtins__': {}}) 会禁用所有内置函数（包括 print、len 等），exec(code, {'__builtins__': {'print': print}}) 只允许使用 print。",
+      "code": "# exec() vs eval() 的区别\nprint(exec(\"x = 2 + 3\"))      # 输出 None（exec 无返回值）\nprint(eval(\"2 + 3\"))           # 输出 5（eval 返回 表达式结果）\n\n# exec() 可以执行复杂语句\nexec(\"\"\"\nresult = 0\nfor i in range(1, 101):\n    result += i\nprint(f'1到100的和是: {result}')\n\"\"\")\n\n# exec() 的命名空间控制\ncustom_globals = {\"__builtins__\": {\"print\": print, \"len\": len, \"range\": range}}\nexec(\"print('只能使用 print、len、range')\", custom_globals)"
+    },
+    {
+      "stepNo": 3,
+      "title": "实现输出捕获机制",
+      "description": "exec() 执行的代码中的 print() 输出默认打印到控制台（sys.stdout），无法被程序捕获。我们需要将输出重定向到一个内存缓冲区中。\n\n实现方法：使用 io.StringIO 创建一个'虚拟输出流'（行为类似文件对象，但数据存在内存中），临时替换 sys.stdout 和 sys.stderr。执行流程为：\n\n1. 创建 StringIO 缓冲区\n2. 保存原始 sys.stdout 和 sys.stderr\n3. 将 sys.stdout 和 sys.stderr 都指向缓冲区\n4. 执行代码（exec）\n5. 在 finally 块中恢复原始 stdout/stderr（确保即使出错也能恢复）\n6. 从缓冲区读取输出内容\n\n返回值设计为一个字典：success（是否成功）、output（捕获的 print 输出）、error（异常信息，成功时为 None）。这种统一格式便于后续处理。",
+      "tip": "必须用 try-finally 确保 sys.stdout 被恢复。如果 exec 抛出异常但没有 finally 块，sys.stdout 会永久指向缓冲区，后续所有 print 都'消失'了。",
+      "code": "import io\nimport sys\n\ndef run_code(code_string):\n    \"\"\"\n    在本地执行一段 Python 代码，并捕获其输出。\n    \n    参数:\n        code_string: 要执行的 Python 代码字符串\n    返回:\n        dict: {\"success\": bool, \"output\": str, \"error\": str|None}\n    \"\"\"\n    output_buffer = io.StringIO()\n    old_stdout = sys.stdout\n    old_stderr = sys.stderr\n    sys.stdout = output_buffer\n    sys.stderr = output_buffer\n    \n    try:\n        exec(code_string)\n        return {\n            \"success\": True,\n            \"output\": output_buffer.getvalue().strip(),\n            \"error\": None\n        }\n    except Exception as e:\n        return {\n            \"success\": False,\n            \"output\": output_buffer.getvalue().strip(),\n            \"error\": f\"{type(e).__name__}: {e}\"\n        }\n    finally:\n        # 无论如何都要恢复 stdout/stderr\n        sys.stdout = old_stdout\n        sys.stderr = old_stderr\n\n\n# 测试\nresult = run_code(\"print('Hello'); print(2 + 3)\")\nprint(f\"成功: {result['success']}\")\nprint(f\"输出: {result['output']}\")\n\nresult_err = run_code(\"x = 1 / 0\")\nprint(f\"成功: {result_err['success']}\")\nprint(f\"错误: {result_err['error']}\")"
+    },
+    {
+      "stepNo": 4,
+      "title": "用正则表达式提取代码块",
+      "description": "大模型返回的回复通常是自然语言+代码块混合的格式，如'好的，我来帮你计算：\\n```python\\n...\\n```\\n计算完成！'。我们需要从中提取出纯代码。\n\n使用正则表达式匹配 ```python 和 ``` 之间的内容。正则模式 r'```(?:python)?\\s*\\n(.*?)```' 的含义：(?:python)? 匹配可选的 'python' 标记（非捕获组），\\s*\\n 匹配标记后的空白和换行，(.*?) 非贪婪匹配代码内容，re.DOTALL 让 . 能匹配换行符。\n\n需要注意的边界情况：模型可能返回不带 python 标记的代码块（只有 ```）、可能返回多个代码块、可能在代码块前后有解释文字。提取后使用 strip() 去除首尾空白。\n\n如果模型没有返回代码块（直接回答了问题），extract_code 返回 None，调用方应直接返回模型的文本回复。",
+      "tip": "如果模型返回多个代码块，findall 会返回所有匹配。对于数据分析任务，通常取第一个；对于复杂任务，可能需要合并所有代码块。",
+      "code": "import re\n\ndef extract_code(response_text):\n    \"\"\"\n    从大模型的回复中提取 Python 代码块。\n    支持 ```python ... ``` 和 ``` ... ``` 两种格式。\n    \n    返回:\n        str|None: 提取的代码，如果没有代码块则返回 None\n    \"\"\"\n    pattern = r'```(?:python)?\\s*\\n(.*?)```'\n    matches = re.findall(pattern, response_text, re.DOTALL)\n    \n    if matches:\n        return matches[0].strip()\n    return None\n\n\n# 测试各种格式\nsamples = [\n    # 带 python 标记\n    \"好的：\\n```python\\nprint('hello')\\n```\",\n    # 不带标记\n    \"代码如下：\\n```\\nx = 42\\nprint(x)\\n```\",\n    # 多个代码块\n    \"第一步：\\n```python\\na = 1\\n```\\n第二步：\\n```python\\nb = 2\\n```\",\n]\n\nfor s in samples:\n    code = extract_code(s)\n    print(f\"提取结果: {repr(code)}\\n\")"
+    },
+    {
+      "stepNo": 5,
+      "title": "实现数据分析助手",
+      "description": "数据分析助手的完整流程分为三步：\n\n第一步，设计 System Prompt 让模型只返回代码块（用 ```python 包裹），不要多余解释。Prompt 中明确要求'代码必须用 print() 输出结果'和'不要使用 matplotlib 等画图库'，因为我们需要纯文本输出。\n\n第二步，提取代码并用 run_code() 执行，捕获输出。\n\n第三步，如果执行成功，把输出结果返回给模型，让它用自然语言总结分析结果。这样用户既能得到精确的计算结果（来自代码执行），又能得到易读的文字解释（来自模型总结）。\n\n这个'代码执行 + 自然语言总结'的两阶段模式是 Code Sandbox 的典型应用模式——代码保证准确性，模型保证可读性。",
+      "tip": "System Prompt 中明确要求'只返回代码块'可以大大提高代码提取的成功率。如果模型返回了自然语言+代码混合内容，extract_code 仍然能正确提取。",
+      "code": "def data_analysis_agent(task, data_context=\"\"):\n    \"\"\"数据分析助手：生成代码 → 执行 → 总结\"\"\"\n    system_prompt = \"\"\"你是一个数据分析专家。用户会给你一段数据和任务，你需要：\n1. 编写 Python 代码来完成任务\n2. 代码必须用 print() 输出结果\n3. 只返回代码块（用 ```python 包裹），不要多余的解释\n4. 不要使用 matplotlib 等画图库，只用纯文本输出\n5. 如果需要处理数据，直接在代码中定义数据\"\"\"\n    \n    user_prompt = f\"任务：{task}\"\n    if data_context:\n        user_prompt += f\"\\n\\n数据：\\n{data_context}\"\n    \n    # 1. 让模型生成代码\n    messages = [\n        {\"role\": \"system\", \"content\": system_prompt},\n        {\"role\": \"user\", \"content\": user_prompt}\n    ]\n    response = client.chat.completions.create(\n        model=\"deepseek-chat\",\n        messages=messages,\n        temperature=0.3  # 低温度，代码更确定\n    )\n    raw_response = response.choices[0].message.content\n    print(f\"[模型生成]\\n{raw_response}\\n\")\n    \n    # 2. 提取并执行代码\n    code = extract_code(raw_response)\n    if code is None:\n        return f\"模型未返回代码块。回复内容：{raw_response}\"\n    \n    print(f\"[执行代码]\\n{code}\\n\")\n    result = run_code(code)\n    \n    if result[\"success\"]:\n        print(f\"[执行结果]\\n{result['output']}\\n\")\n        # 3. 把结果返回给模型做总结\n        messages.append({\"role\": \"assistant\", \"content\": raw_response})\n        messages.append({\"role\": \"user\", \"content\": f\"代码执行成功，输出如下：\\n{result['output']}\\n\\n请用自然语言总结分析结果。\"})\n        summary = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=messages,\n            temperature=0.5\n        )\n        return summary.choices[0].message.content\n    else:\n        return f\"代码执行出错: {result['error']}\""
+    },
+    {
+      "stepNo": 6,
+      "title": "实现自我修正循环",
+      "description": "模型生成的代码不一定一次就跑对。常见的错误类型包括：语法错误（缩进不对、括号不匹配）、运行时错误（除零、类型错误、索引越界）、逻辑错误（算法不对但能运行）、使用了被禁止的库（如 matplotlib）。\n\n自我修正智能体实现了一个自动纠错循环：生成代码 → 执行 → 如果出错，把错误信息和之前的代码一起返回给模型，让它分析原因并修改 → 重新执行，最多重试 N 次。\n\n关键在于 messages 列表的维护：每次重试时，模型需要看到之前的代码（assistant 消息）和错误信息（user 消息），才能有针对性地修改。这种'让模型看报错并修正'的方法，本质上是利用了模型的推理能力来调试代码——模型能理解错误信息的含义并推断修复方案。\n\n实践建议：设置最大重试次数（如 3 次）防止无限循环；每次重试时 temperature 可以略微提高（如 0.3 → 0.5），增加模型尝试不同解法的概率；在错误提示中明确告诉模型'请分析错误原因'，引导它进行反思而非盲目修改。",
+      "tip": "自我修正的成功率与错误类型有关：语法错误和简单运行时错误修正率高（>80%），逻辑错误修正率低（模型可能反复犯同样的逻辑错误）。",
+      "code": "def self_fixing_agent(task, max_retries=3):\n    \"\"\"自我修正代码智能体\"\"\"\n    system_prompt = \"\"\"你是一个 Python 编程专家。请编写代码完成任务：\n1. 代码必须用 print() 输出结果\n2. 只返回代码块（用 ```python 包裹）\n3. 不要使用 matplotlib 或网络请求\n4. 确保代码没有语法错误\"\"\"\n    \n    messages = [\n        {\"role\": \"system\", \"content\": system_prompt},\n        {\"role\": \"user\", \"content\": f\"请完成以下任务：{task}\"}\n    ]\n    \n    for attempt in range(1, max_retries + 1):\n        print(f\"\\n--- 第 {attempt}/{max_retries} 次尝试 ---\")\n        \n        response = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=messages,\n            temperature=0.3\n        )\n        raw_response = response.choices[0].message.content\n        \n        code = extract_code(raw_response)\n        if code is None:\n            print(\"模型未返回代码块\")\n            return raw_response\n        \n        print(f\"代码:\\n{code}\")\n        result = run_code(code)\n        \n        if result[\"success\"]:\n            print(f\"执行成功！输出: {result['output']}\")\n            # 让模型总结结果\n            messages.append({\"role\": \"assistant\", \"content\": raw_response})\n            messages.append({\"role\": \"user\", \"content\": f\"代码执行成功，输出：\\n{result['output']}\\n\\n请用自然语言总结结果。\"})\n            summary = client.chat.completions.create(\n                model=\"deepseek-chat\",\n                messages=messages,\n                temperature=0.5\n            )\n            return summary.choices[0].message.content\n        else:\n            print(f\"执行失败: {result['error']}\")\n            # 把错误信息返回给模型修正\n            messages.append({\"role\": \"assistant\", \"content\": raw_response})\n            messages.append({\"role\": \"user\", \"content\": f\"代码执行出错了：\\n错误信息: {result['error']}\\n\\n请分析错误原因，修改代码后重新提交。\"})\n    \n    return \"任务失败：多次尝试后代码仍然出错。\""
+    },
+    {
+      "stepNo": 7,
+      "title": "代码执行超时控制",
+      "description": "模型生成的代码可能包含无限循环或极耗时的操作（如递归过深、大数据排序）。如果不加限制，exec() 会一直阻塞，导致整个智能体挂起。\n\nPython 中实现超时控制有几种方法：\n\n1. signal 模块（仅 Linux/Mac）：使用 signal.alarm() 设置定时器，超时后抛出 TimeoutError。简单但仅限 Unix 系统。\n\n2. threading 模块（跨平台）：在子线程中执行代码，主线程用 join(timeout) 等待。超时后无法强制终止子线程（Python 的限制），但可以放弃等待并标记为超时。\n\n3. subprocess 模块（推荐）：将代码写入临时文件，用 subprocess.run() 执行，设置 timeout 参数。这是最可靠的跨平台方案，因为子进程可以被强制终止。\n\n本项目使用 signal 方案（简单直观），但提醒生产环境应使用 subprocess 或容器隔离方案。",
+      "tip": "在 Windows 上 signal.SIGALRM 不可用。跨平台方案建议用 subprocess：将代码写入临时 .py 文件，用 subprocess.run(['python', tmpfile], timeout=10, capture_output=True) 执行。",
+      "code": "import signal\n\nclass TimeoutError(Exception):\n    pass\n\ndef timeout_handler(signum, frame):\n    raise TimeoutError(\"代码执行超时\")\n\ndef run_code_with_timeout(code_string, timeout_seconds=10):\n    \"\"\"带超时控制的代码执行（仅 Linux/Mac）\"\"\"\n    output_buffer = io.StringIO()\n    old_stdout = sys.stdout\n    old_stderr = sys.stderr\n    sys.stdout = output_buffer\n    sys.stderr = output_buffer\n    \n    # 设置超时定时器\n    old_handler = signal.signal(signal.SIGALRM, timeout_handler)\n    signal.alarm(timeout_seconds)\n    \n    try:\n        exec(code_string)\n        signal.alarm(0)  # 取消定时器\n        return {\"success\": True, \"output\": output_buffer.getvalue().strip(), \"error\": None}\n    except TimeoutError:\n        return {\"success\": False, \"output\": \"\", \"error\": f\"执行超时（{timeout_seconds}秒限制）\"}\n    except Exception as e:\n        return {\"success\": False, \"output\": output_buffer.getvalue().strip(), \"error\": f\"{type(e).__name__}: {e}\"}\n    finally:\n        signal.alarm(0)\n        signal.signal(signal.SIGALRM, old_handler)\n        sys.stdout = old_stdout\n        sys.stderr = old_stderr"
+    },
+    {
+      "stepNo": 8,
+      "title": "理解生产环境中的安全隔离",
+      "description": "本项目使用 exec() 执行代码，仅用于学习演示。在生产环境中，这是极其危险的——模型生成的代码可以：\n\n- 删除或修改文件系统上的任意文件（os.system('rm -rf /')）\n- 读取敏感信息（如环境变量中的 API Key、数据库密码）\n- 发起网络请求（requests.post 向恶意服务器发送数据）\n- 消耗大量 CPU/内存导致系统崩溃（如 while True: pass 或分配 100GB 内存）\n\n生产级 Code Sandbox 必须使用隔离环境：\n\n1. Docker 容器（最常用）：每个代码执行任务在一个独立容器中运行，提供进程级隔离、文件系统隔离、网络隔离。容器执行完毕后销毁。\n2. gVisor / Firecracker：更轻量级的沙箱方案。gVisor 是 Google 开发的应用内核，拦截系统调用；Firecracker 是 AWS 开发的微型虚拟机，Lambda 和 Fargate 底层都用的它。\n3. 云函数（AWS Lambda / 阿里云函数计算）：利用云平台的隔离机制，每次执行在独立环境中运行。\n\n隔离环境应限制：文件系统访问（只读或限定目录）、网络访问（白名单或完全禁止）、CPU/内存使用（cgroup 限制）、执行时间（超时自动终止）。",
+      "tip": "即使是'可信'的模型生成的代码也可能包含意外行为（如模型'幻觉'出不存在的 API 导致无限重试），生产环境中永远不要直接用 exec() 执行 LLM 生成的代码。",
+      "code": "# 生产环境的 Docker 沙箱示例（概念代码）\nimport subprocess\nimport tempfile\nimport os\n\ndef run_code_in_docker(code_string, timeout=30):\n    \"\"\"在 Docker 容器中执行代码（需要预构建沙箱镜像）\"\"\"\n    # 将代码写入临时文件\n    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:\n        f.write(code_string)\n        tmpfile = f.name\n    \n    try:\n        # 在 Docker 容器中执行\n        result = subprocess.run(\n            [\n                \"docker\", \"run\", \"--rm\",\n                \"--network=none\",           # 禁止网络访问\n                \"--memory=256m\",            # 限制内存 256MB\n                \"--cpus=0.5\",               # 限制 CPU 使用\n                \"-v\", f\"{tmpfile}:/code.py:ro\",  # 只读挂载代码文件\n                \"python-sandbox\",           # 沙箱镜像名\n                \"python\", \"/code.py\"\n            ],\n            capture_output=True,\n            text=True,\n            timeout=timeout\n        )\n        return {\n            \"success\": result.returncode == 0,\n            \"output\": result.stdout.strip(),\n            \"error\": result.stderr.strip() if result.returncode != 0 else None\n        }\n    except subprocess.TimeoutExpired:\n        return {\"success\": False, \"output\": \"\", \"error\": f\"执行超时（{timeout}秒限制）\"}\n    finally:\n        os.unlink(tmpfile)  # 清理临时文件"
+    }
+  ]
+}

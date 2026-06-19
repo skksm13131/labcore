@@ -40,7 +40,7 @@ public class LearningProgressController {
     public Result<List<LearningProgressResponse>> getByUserAndItem(@RequestParam Long itemPk) {
         Long userId = requireUserId();
         if (itemPk == null || itemPk <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid itemPk");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "学习项参数不正确");
         }
         return Result.ok(learningProgressService.listByUserAndItem(userId, itemPk));
     }
@@ -56,7 +56,7 @@ public class LearningProgressController {
         // allow admin or the user themselves
         User currentUser = accessService.requireUser();
         if (currentUser.getRole() != User.Role.ADMIN && !currentUser.getId().equals(userId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权查看该用户的学习进度");
         }
         return Result.ok(learningProgressService.listByUser(userId));
     }
@@ -77,7 +77,7 @@ public class LearningProgressController {
     public Result<LearningProgressResponse> createFirstEntry(@RequestBody LearningProgressCreateRequest req) {
         Long userId = requireUserId();
         if (req == null || req.getItemPk() == null || req.getItemPk() <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid itemPk");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "学习项参数不正确");
         }
         return Result.ok(learningProgressService.createFirstEntry(userId, req.getItemPk()));
     }
@@ -86,7 +86,7 @@ public class LearningProgressController {
     public Result<LearningProgressResponse> complete(@RequestBody LearningProgressCompleteRequest req) {
         Long userId = requireUserId();
         if (req == null || req.getItemPk() == null || req.getItemPk() <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid itemPk");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "学习项参数不正确");
         }
         return Result.ok(learningProgressService.completeLearning(
                 userId, req.getItemPk(), req.getCompleteRemark()));
@@ -96,7 +96,7 @@ public class LearningProgressController {
     public Result<LearningProgressTimeResponse> updateLearnDuration(@RequestBody LearningProgressTimeRequest req) {
         Long userId = requireUserId();
         if (req == null || req.getItemPk() == null || req.getItemPk() <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid itemPk");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "学习项参数不正确");
         }
         return Result.ok(learningProgressService.updateLearnDuration(
                 userId, req.getItemPk(), req.getDeltaSec()));
@@ -105,7 +105,7 @@ public class LearningProgressController {
     private Long requireUserId() {
         Long userId = BaseContext.getCurrentId();
         if (userId == null || userId <= 0) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
         }
         return userId;
     }

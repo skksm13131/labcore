@@ -41,6 +41,7 @@ public class LearningContentAdminService {
     public static final String STATUS_DRAFT = "DRAFT";
     public static final String STATUS_PUBLISHED = "PUBLISHED";
     public static final String STATUS_ARCHIVED = "ARCHIVED";
+    private static final String STATUS_NO_MATCH = "__NO_MATCH__";
     private static final String STATIC_EXPERIMENT_BASE = "classpath:/static/experiments/";
 
     private final LearningItemMapper learningItemMapper;
@@ -66,18 +67,7 @@ public class LearningContentAdminService {
     }
 
     public PageResponse<AdminLearningItemSummaryResponse> pageItems(String keyword, String status, String category, long page, long pageSize) {
-        LambdaQueryWrapper<LearningItem> wrapper = new LambdaQueryWrapper<>();
-        if (StringUtils.hasText(keyword)) {
-            wrapper.and(w -> w.like(LearningItem::getTitle, keyword.trim())
-                    .or()
-                    .like(LearningItem::getSummary, keyword.trim()));
-        }
-        if (StringUtils.hasText(status)) {
-            wrapper.eq(LearningItem::getStatus, normalizeStatus(status));
-        }
-        if (StringUtils.hasText(category)) {
-            wrapper.eq(LearningItem::getCategory, category.trim());
-        }
+        LambdaQueryWrapper<LearningItem> wrapper = itemQuery(keyword, status, category);
         long total = learningItemMapper.selectCount(wrapper);
         wrapper.orderByDesc(LearningItem::getUpdatedAt).orderByDesc(LearningItem::getItemPk);
         wrapper.last("LIMIT " + offset(page, pageSize) + ", " + pageSize);
@@ -107,6 +97,38 @@ public class LearningContentAdminService {
                         .build())
                 .collect(Collectors.toList());
         return PageResponse.of(records, total, page, pageSize);
+    }
+
+    public Map<String, Long> stats(String keyword, String status, String category) {
+        Map<String, Long> stats = new LinkedHashMap<>();
+        stats.put("total", learningItemMapper.selectCount(itemQuery(keyword, status, category)));
+        stats.put("draft", learningItemMapper.selectCount(itemQuery(keyword, restrictStatus(status, STATUS_DRAFT), category)));
+        stats.put("published", learningItemMapper.selectCount(itemQuery(keyword, restrictStatus(status, STATUS_PUBLISHED), category)));
+        stats.put("archived", learningItemMapper.selectCount(itemQuery(keyword, restrictStatus(status, STATUS_ARCHIVED), category)));
+        return stats;
+    }
+
+    private LambdaQueryWrapper<LearningItem> itemQuery(String keyword, String status, String category) {
+        LambdaQueryWrapper<LearningItem> wrapper = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(keyword)) {
+            wrapper.and(w -> w.like(LearningItem::getTitle, keyword.trim())
+                    .or()
+                    .like(LearningItem::getSummary, keyword.trim()));
+        }
+        if (StringUtils.hasText(status)) {
+            wrapper.eq(LearningItem::getStatus, STATUS_NO_MATCH.equals(status) ? STATUS_NO_MATCH : normalizeStatus(status));
+        }
+        if (StringUtils.hasText(category)) {
+            wrapper.eq(LearningItem::getCategory, category.trim());
+        }
+        return wrapper;
+    }
+
+    private String restrictStatus(String selectedStatus, String statStatus) {
+        if (!StringUtils.hasText(selectedStatus)) {
+            return statStatus;
+        }
+        return statStatus.equalsIgnoreCase(selectedStatus.trim()) ? statStatus : STATUS_NO_MATCH;
     }
 
     private long offset(long page, long pageSize) {

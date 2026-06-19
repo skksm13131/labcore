@@ -1,0 +1,88 @@
+{
+  "title": "Tool Use — 让智能体具备外部工具调用能力",
+  "summary": "从大语言模型的根本局限性出发，讲解 Function Calling 机制的设计原理与实现细节。深入理解 JSON Schema 工具定义、tool_calls 消息解析、tool 角色消息回传的完整协议，掌握单工具调用、多工具路由、并行工具调用以及工具调用错误处理的工程实践。",
+  "category": "智能体核心能力",
+  "difficulty": "中等",
+  "duration": "3小时",
+  "prerequisites": "项目一完成（掌握 API 调用与 messages 结构）、JSON 格式基础、Python 字典与列表操作",
+  "objectives": [
+    "理解大模型的四类根本局限以及 Tool Use 的解决思路",
+    "掌握 Function Calling 协议的完整六步流程及其背后的设计动机",
+    "能够用 JSON Schema 精确定义工具的名称、描述、参数类型与约束",
+    "理解 assistant（带 tool_calls）和 tool 两种新消息角色的格式要求",
+    "实现单工具、多工具路由与并行工具调用的智能体",
+    "掌握工具调用中的错误处理与边界情况应对"
+  ],
+  "features": [
+    {
+      "title": "Function Calling 协议",
+      "description": "DeepSeek/OpenAI 提供的标准化工具调用协议。模型通过返回 tool_calls 字段表达调用意图，由系统执行后将结果回传模型，模型再据此生成最终回答。"
+    },
+    {
+      "title": "工具定义与注册",
+      "description": "使用 JSON Schema 格式描述工具的 name、description、parameters，模型据此判断何时调用哪个工具以及传递什么参数。工具描述的质量直接决定调用的准确性。"
+    },
+    {
+      "title": "多工具路由与并行调用",
+      "description": "通过工具注册表实现多工具路由分发，支持模型在一次回复中并行调用多个工具，以及处理工具调用中的各种异常情况。"
+    }
+  ],
+  "steps": [
+    {
+      "stepNo": 1,
+      "title": "理解大模型的根本局限与 Tool Use 的设计动机",
+      "description": "大语言模型有四个根本局限，理解这些局限是理解 Tool Use 设计动机的前提：\n\n1. 知识截止：模型的知识停留在训练数据的截止日期，无法获取实时信息（如今日天气、最新论文）。\n2. 计算不可靠：模型通过概率分布生成 token，不擅长精确算术。1234×5678 模型可能'猜'一个接近的答案，但不保证正确。\n3. 无法访问外部系统：模型不能查数据库、读文件、调 API，它的世界就是训练数据和输入 prompt。\n4. 幻觉问题：模型可能自信地编造不存在的事实，因为它本质上是在做'合理的续写'而非'事实检索'。\n\nTool Use 的核心思想是'模型负责决策，工具负责执行'——模型像一个被关在房间里的智者，可以思考推理但无法直接观察外界。工具就是房间开的小窗口：模型判断需要外界信息时，递一张纸条出去（输出工具调用指令），外面的助手执行操作后把结果递回来（tool 消息），模型再根据结果组织回答。",
+      "tip": "关键理解：模型本身并不执行工具。它只是输出一个'我想调用 get_weather(city='Beijing')'的结构化指令，真正的函数执行发生在我们本地的 Python 代码中。模型的角色是'决策者'而非'执行者'。",
+      "code": ""
+    },
+    {
+      "stepNo": 2,
+      "title": "定义本地工具函数",
+      "description": "工具调用的第一步是定义真正执行功能的本地 Python 函数。这些函数与模型无关，是纯粹的业务逻辑。以天气查询为例，我们使用免费的 wttr.in API 获取真实天气数据——这是一个开源天气服务，返回 JSON 格式数据，无需注册 API Key，适合学习使用。\n\n函数设计要点：参数类型要明确（str、int 等），返回值统一为字符串（因为最终要作为 tool 消息的 content 发给模型），要有异常处理（网络请求可能失败），返回信息要有意义（模型需要据此生成自然语言回答）。",
+      "tip": "工具函数的返回值会被模型'阅读'并据此生成回答，所以返回值应该是信息丰富的自然语言字符串，而不是原始的数据结构。",
+      "code": "import requests\n\ndef get_weather(city: str) -> str:\n    \"\"\"查询指定城市的实时天气（使用 wttr.in 免费 API）\"\"\"\n    try:\n        resp = requests.get(\n            f\"https://wttr.in/{city}?format=j1&lang=zh\",\n            timeout=10\n        )\n        data = resp.json()\n        current = data[\"current_condition\"][0]\n        temp = current[\"temp_C\"]\n        humidity = current[\"humidity\"]\n        desc = current[\"lang_zh\"][0][\"value\"]\n        feels_like = current[\"FeelsLikeC\"]\n        wind_speed = current[\"windspeedKmph\"]\n        \n        return f\"{city}当前天气：{desc}，气温 {temp}°C，体感 {feels_like}°C，湿度 {humidity}%，风速 {wind_speed}km/h\"\n    except Exception as e:\n        return f\"获取 {city} 天气失败：{e}\"\n\n\ndef calculate_days(date1: str, date2: str) -> str:\n    \"\"\"计算两个日期之间相差多少天\"\"\"\n    from datetime import datetime\n    d1 = datetime.strptime(date1, \"%Y-%m-%d\")\n    d2 = datetime.strptime(date2, \"%Y-%m-%d\")\n    diff = abs((d2 - d1).days)\n    return f\"{date1} 到 {date2} 相差 {diff} 天\"\n\n\n# 测试工具函数\nprint(get_weather(\"Kaifeng\"))\nprint(calculate_days(\"2025-01-01\", \"2025-10-01\"))"
+    },
+    {
+      "stepNo": 3,
+      "title": "用 JSON Schema 定义工具描述",
+      "description": "工具描述是给模型看的'说明书'，使用 JSON Schema 格式。它不是执行函数，而是告诉模型'你有哪些工具可以用，每个工具需要什么参数'。每个工具描述包含三部分：\n\nname：工具名称，模型据此指定调用哪个工具。命名要清晰，如 get_weather 比 tool_1 更好。\n\ndescription：工具功能描述，模型据此判断何时应该调用。这是最关键的字段——描述不准确会导致模型在该调用时不调用，或不该调用时乱调用。描述中应包含使用场景和返回内容的说明。\n\nparameters：参数定义，使用 JSON Schema 的 type/properties/required 结构。每个参数需要有 type（类型）、description（描述，含示例值）。required 数组指定必填参数。支持的参数类型包括 string、number、integer、boolean、array、object。\n\n对于枚举类型的参数，可以使用 enum 字段限制取值范围，如 {\"type\": \"string\", \"enum\": [\"celsius\", \"fahrenheit\"]}。",
+      "tip": "description 中给出参数示例（如'城市英文名，例如 Beijing、Shanghai'）能显著提高模型传参的准确性。模糊的描述（如'城市名称'）可能导致模型传中文名而非拼音。",
+      "code": "weather_tool = {\n    \"type\": \"function\",\n    \"function\": {\n        \"name\": \"get_weather\",\n        \"description\": \"根据城市名称查询当前的实时天气情况，包括温度、天气状况、湿度和风速。当用户询问任何与天气相关的问题时应调用此工具。\",\n        \"parameters\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"city\": {\n                    \"type\": \"string\",\n                    \"description\": \"要查询天气的城市英文名（拼音），例如：Beijing、Shanghai、Guangzhou\"\n                }\n            },\n            \"required\": [\"city\"]\n        }\n    }\n}\n\n# 带枚举参数的工具示例\nunit_tool = {\n    \"type\": \"function\",\n    \"function\": {\n        \"name\": \"convert_temperature\",\n        \"description\": \"在摄氏度和华氏度之间转换温度\",\n        \"parameters\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"value\": {\"type\": \"number\", \"description\": \"温度数值\"},\n                \"from_unit\": {\n                    \"type\": \"string\",\n                    \"enum\": [\"celsius\", \"fahrenheit\"],\n                    \"description\": \"原始温度单位\"\n                },\n                \"to_unit\": {\n                    \"type\": \"string\",\n                    \"enum\": [\"celsius\", \"fahrenheit\"],\n                    \"description\": \"目标温度单位\"\n                }\n            },\n            \"required\": [\"value\", \"from_unit\", \"to_unit\"]\n        }\n    }\n}"
+    },
+    {
+      "stepNo": 4,
+      "title": "理解两种新的消息角色",
+      "description": "Tool Use 在 system/user/assistant 基础上引入了两种新的消息结构：\n\n第一种：带 tool_calls 的 assistant 消息。当模型判断需要调用工具时，返回的 content 为空字符串，取而代之的是 tool_calls 数组。每个 tool_call 包含：id（本次调用的唯一标识符，如 'call_abc123'）、type（固定为 'function'）、function.name（要调用的函数名）和 function.arguments（JSON 格式的参数字符串）。注意 arguments 是字符串而非字典，需要用 json.loads() 解析。\n\n第二种：tool 消息。工具执行完成后，通过 role: 'tool' 的消息将结果返回给模型。其中 tool_call_id 必须与 assistant 消息中对应 tool_call 的 id 完全匹配——这是 API 用来关联请求和响应的机制。\n\n重要规则：每个 tool_call 都必须有一条对应的 tool 消息，数量必须一一对应。如果模型返回了 3 个 tool_calls，就必须有 3 条 tool 消息，否则 API 会报错 'insufficient tool messages following tool_calls message'。assistant 消息中 content 必须是空字符串 \"\" 而不是 None。",
+      "tip": "最常见的错误是 tool_call_id 不匹配或 tool 消息数量不对。调试时建议打印 messages 列表，检查每条 tool 消息的 tool_call_id 是否与 assistant 中的 id 一一对应。",
+      "code": "# 完整的消息流转示例\n\n# 第 1 次 API 调用：用户提问\nmessages = [\n    {\"role\": \"user\", \"content\": \"北京今天天气怎么样？\"}\n]\n# → 模型返回 assistant 消息，包含 tool_calls：\n# {\n#     \"role\": \"assistant\",\n#     \"content\": \"\",\n#     \"tool_calls\": [{\n#         \"id\": \"call_abc123\",\n#         \"type\": \"function\",\n#         \"function\": {\n#             \"name\": \"get_weather\",\n#             \"arguments\": \"{\\\"city\\\": \\\"Beijing\\\"}\"\n#         }\n#     }]\n# }\n\n# 第 2 次 API 调用：带上完整历史\nmessages = [\n    {\"role\": \"user\", \"content\": \"北京今天天气怎么样？\"},\n    {\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": [...]},\n    {\"role\": \"tool\", \"tool_call_id\": \"call_abc123\", \"content\": \"Beijing当前天气：晴，气温 28°C\"},\n]\n# → 模型根据工具结果，生成最终回答：\"北京今天天气晴朗，气温28°C...\""
+    },
+    {
+      "stepNo": 5,
+      "title": "实现单工具调用的完整流程",
+      "description": "单工具智能体的完整流程是一个循环：\n\n第 1 步：将用户消息和 tools 参数一起发送给模型。tools 参数告诉模型'你有这个工具可以用'。\n第 2 步：检查返回的 assistant 消息是否包含 tool_calls。如果没有，说明模型判断不需要工具（如用户问'你好'），直接返回 content。\n第 3 步：如果有 tool_calls，需要把 assistant 消息（含 tool_calls）追加到 messages 中。这里需要将 SDK 返回的对象转为字典格式。\n第 4 步：遍历每个 tool_call，解析函数名和参数，执行对应的本地函数。\n第 5 步：将每个工具的执行结果作为 tool 消息追加到 messages 中，tool_call_id 必须与对应的 tool_call.id 匹配。\n第 6 步：再次调用 API。模型看到工具结果后，可能生成最终回答，也可能继续调用工具（多轮工具调用）。因此整个流程用 while 循环包裹。\n\n设置最大轮次限制（如 5 轮）防止无限循环。",
+      "tip": "messages 列表的完整性至关重要。模型需要通过完整的消息历史来理解工具调用的上下文和结果。不要在中途丢弃任何消息。",
+      "code": "def weather_agent(user_query):\n    \"\"\"天气查询智能体：支持多轮工具调用\"\"\"\n    print(f\"用户提问：{user_query}\\n\")\n    messages = [{\"role\": \"user\", \"content\": user_query}]\n    \n    round_num = 0\n    while True:\n        round_num += 1\n        print(f\"--- 第 {round_num} 轮 API 调用 ---\")\n        \n        response = client.chat.completions.create(\n            model=\"deepseek-chat\",\n            messages=messages,\n            tools=[weather_tool],\n        )\n        assistant_msg = response.choices[0].message\n        \n        # 没有工具调用 → 最终回答\n        if not assistant_msg.tool_calls:\n            print(f\"最终回答：{assistant_msg.content}\")\n            return assistant_msg.content\n        \n        # 有工具调用 → 构建 assistant 消息\n        print(f\"模型决定调用 {len(assistant_msg.tool_calls)} 个工具\")\n        tool_calls_dict = [{\n            \"id\": tc.id, \"type\": \"function\",\n            \"function\": {\"name\": tc.function.name, \"arguments\": tc.function.arguments}\n        } for tc in assistant_msg.tool_calls]\n        messages.append({\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": tool_calls_dict})\n        \n        # 执行每个工具并添加 tool 消息\n        for tc in assistant_msg.tool_calls:\n            args = json.loads(tc.function.arguments)\n            print(f\"  调用工具：{tc.function.name}({args})\")\n            result = get_weather(**args)\n            print(f\"  执行结果：{result}\")\n            messages.append({\"role\": \"tool\", \"tool_call_id\": tc.id, \"content\": result})\n        \n        if round_num >= 5:\n            print(\"达到最大轮次限制\")\n            break"
+    },
+    {
+      "stepNo": 6,
+      "title": "实现多工具协作与工具注册表",
+      "description": "当智能体拥有多个工具时，需要一个路由机制来根据模型返回的函数名调用不同的本地函数。推荐使用工具注册表（TOOL_REGISTRY）——一个字典，将工具名字符串映射到实际的 Python 函数对象。\n\n相比 if-else 链，注册表的优势：新增工具只需两行代码（定义函数 + 注册映射），不需要修改路由逻辑；可以用循环统一处理所有工具，代码更简洁；可以动态注册/注销工具（如根据用户权限决定可用工具集）。\n\n将所有工具的描述放入 tools 列表传给 API，模型会根据用户意图自动选择合适的工具。模型选择工具的依据主要来自 description 字段——所以每个工具的描述要有足够的区分度，让模型能区分何时该用哪个。",
+      "tip": "工具注册表是生产环境中的标准做法，它让代码符合开闭原则（对扩展开放，对修改关闭）。当工具数量超过 10 个时，建议将工具描述也自动生成（从函数的 docstring 提取），减少手动维护。",
+      "code": "from datetime import datetime\n\n# 本地工具函数\ndef get_weather(city: str) -> str:\n    \"\"\"查询天气...\"\"\"\n    # ... 同前面的实现 ...\n    pass\n\ndef calculate_days(date1: str, date2: str) -> str:\n    \"\"\"计算日期差...\"\"\"\n    d1 = datetime.strptime(date1, \"%Y-%m-%d\")\n    d2 = datetime.strptime(date2, \"%Y-%m-%d\")\n    return f\"{date1} 到 {date2} 相差 {abs((d2-d1).days)} 天\"\n\n# 工具描述列表\ntools = [weather_tool_description, calculate_days_tool_description]\n\n# 工具注册表：名字 → 函数对象的映射\nTOOL_REGISTRY = {\n    \"get_weather\": get_weather,\n    \"calculate_days\": calculate_days,\n}\n\n# 统一路由\nfor tc in assistant_msg.tool_calls:\n    function_name = tc.function.name\n    arguments = json.loads(tc.function.arguments)\n    \n    if function_name in TOOL_REGISTRY:\n        result = TOOL_REGISTRY[function_name](**arguments)\n    else:\n        result = f\"错误：未知工具 {function_name}\"\n    \n    print(f\"调用：{function_name}({arguments}) → {result}\")"
+    },
+    {
+      "stepNo": 7,
+      "title": "处理并行工具调用",
+      "description": "模型可以在一次回复中返回多个 tool_calls，表示需要并行调用多个工具。典型场景：用户问'上海和北京哪个更热？'，模型会同时返回两个 get_weather 调用（一个查上海，一个查北京）。\n\n处理并行调用的关键：必须为每个 tool_call 都执行本地函数并返回对应的 tool 消息。所有 tool 消息在同一次 API 调用中一起发给模型，模型会综合所有工具结果生成回答。\n\n在构建 messages 时，一个 assistant 消息（含 N 个 tool_calls）后面必须紧跟 N 条 tool 消息，顺序不强制要求与 tool_calls 一致，但 tool_call_id 必须一一对应。建议按相同顺序构建，便于调试。",
+      "tip": "并行工具调用是模型'聪明'的体现——它知道需要两个城市的数据才能比较，于是一次性请求两个工具调用，而不是分两轮。这减少了 API 调用次数，提高了效率。",
+      "code": "def smart_agent(user_query):\n    \"\"\"多工具智能体：支持并行工具调用\"\"\"\n    print(f\"用户提问：{user_query}\\n\")\n    \n    response = client.chat.completions.create(\n        model=\"deepseek-chat\",\n        messages=[{\"role\": \"user\", \"content\": user_query}],\n        tools=tools,\n    )\n    assistant_msg = response.choices[0].message\n    \n    if assistant_msg.tool_calls:\n        tool_results = []\n        \n        # 执行所有工具调用（可能并行）\n        for tc in assistant_msg.tool_calls:\n            args = json.loads(tc.function.arguments)\n            print(f\"调用工具：{tc.function.name}({args})\")\n            result = TOOL_REGISTRY[tc.function.name](**args)\n            print(f\"执行结果：{result}\")\n            tool_results.append((tc.id, result))\n        \n        # 构建完整 messages\n        messages = [{\"role\": \"user\", \"content\": user_query}]\n        tool_calls_dict = [{\n            \"id\": tc.id, \"type\": \"function\",\n            \"function\": {\"name\": tc.function.name, \"arguments\": tc.function.arguments}\n        } for tc in assistant_msg.tool_calls]\n        messages.append({\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": tool_calls_dict})\n        for tool_id, result in tool_results:\n            messages.append({\"role\": \"tool\", \"tool_call_id\": tool_id, \"content\": result})\n        \n        # 模型综合所有工具结果生成回答\n        final = client.chat.completions.create(\n            model=\"deepseek-chat\", messages=messages\n        )\n        print(f\"最终回答：{final.choices[0].message.content}\")\n        return final.choices[0].message.content"
+    },
+    {
+      "stepNo": 8,
+      "title": "工具调用的错误处理与边界情况",
+      "description": "工具调用中有多种可能的错误场景需要处理：\n\n1. 工具执行异常：本地函数抛出异常（如网络超时、文件不存在）。应在函数内部 try-except 捕获，返回错误信息字符串而非让程序崩溃。错误信息会被模型看到，模型可能会换个参数重试或告知用户。\n\n2. 未知工具名：模型返回了一个不在注册表中的函数名（罕见但可能，尤其在工具描述有歧义时）。应返回友好的错误提示。\n\n3. 参数解析失败：arguments 不是合法 JSON，或参数类型不匹配（如模型传了字符串但函数期望数字）。用 try-except 包裹 json.loads() 和函数调用。\n\n4. 模型幻觉工具：模型可能'发明'一个不存在的工具名。通过注册表的 existence check 可以拦截。\n\n5. 无限循环：模型反复调用工具而不给出最终回答。通过设置最大轮次限制来防止。\n\n这些错误处理不仅是工程需要，也影响智能体的可靠性——一个能优雅处理错误的智能体比一个遇到异常就崩溃的智能体实用得多。",
+      "tip": "建议将工具执行逻辑封装为统一的 dispatch 函数，集中处理所有错误情况，而不是在每个工具函数中重复写 try-except。",
+      "code": "def dispatch_tool_call(tc) -> tuple:\n    \"\"\"\n    统一工具调度函数，处理所有错误情况。\n    返回 (tool_call_id, result_string)\n    \"\"\"\n    function_name = tc.function.name\n    \n    # 检查工具是否存在\n    if function_name not in TOOL_REGISTRY:\n        return tc.id, f\"错误：未知工具 '{function_name}'。可用工具：{list(TOOL_REGISTRY.keys())}\"\n    \n    # 解析参数\n    try:\n        arguments = json.loads(tc.function.arguments)\n    except json.JSONDecodeError as e:\n        return tc.id, f\"错误：参数解析失败 - {e}。原始参数：{tc.function.arguments}\"\n    \n    # 执行工具\n    try:\n        result = TOOL_REGISTRY[function_name](**arguments)\n        return tc.id, str(result)\n    except Exception as e:\n        return tc.id, f\"工具执行出错：{type(e).__name__}: {e}\""
+    }
+  ]
+}

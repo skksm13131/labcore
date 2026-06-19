@@ -32,16 +32,16 @@ public class AuthRateLimiter {
     public void checkLoginAllowed(String username, HttpServletRequest request) {
         String ip = clientIp(request);
         String normalizedUsername = normalize(username);
-        assertAllowed("login:ip:" + ip, "Too many login attempts");
-        assertAllowed("login:user:" + normalizedUsername, "Too many login attempts");
+        assertAllowed("login:ip:" + ip, "登录尝试过于频繁，请稍后再试");
+        assertAllowed("login:user:" + normalizedUsername, "登录尝试过于频繁，请稍后再试");
         checkWindowAllowed("login_req:ip:" + ip,
                 LOGIN_MAX_ATTEMPTS,
                 LOGIN_ATTEMPT_WINDOW,
-                "Too many login attempts");
+                "登录尝试过于频繁，请稍后再试");
         checkWindowAllowed("login_req:user:" + normalizedUsername,
                 LOGIN_MAX_ATTEMPTS,
                 LOGIN_ATTEMPT_WINDOW,
-                "Too many login attempts");
+                "登录尝试过于频繁，请稍后再试");
     }
 
     public void recordLoginFailure(String username, HttpServletRequest request) {
@@ -58,14 +58,14 @@ public class AuthRateLimiter {
         checkWindowAllowed("register:ip:" + clientIp(request),
                 REGISTER_MAX_ATTEMPTS,
                 REGISTER_WINDOW,
-                "Too many registration attempts");
+                "注册尝试过于频繁，请稍后再试");
     }
 
     public void checkRefreshAllowed(HttpServletRequest request) {
         checkWindowAllowed("refresh:ip:" + clientIp(request),
                 REFRESH_MAX_ATTEMPTS,
                 REFRESH_WINDOW,
-                "Too many token refresh attempts");
+                "登录状态刷新过于频繁，请稍后再试");
     }
 
     private void checkWindowAllowed(String key, int maxAttempts, Duration window, String message) {
