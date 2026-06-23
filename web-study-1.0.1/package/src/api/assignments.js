@@ -87,6 +87,10 @@ export function getAdminAssignmentSubmissions(id, params = {}) {
   return request({ url: `/admin/assignments/${id}/submissions`, method: 'get', params })
 }
 
+export function getAdminSubmissionBatchDownloadInfo(id, params = {}) {
+  return request({ url: `/admin/assignments/${id}/submissions/files/download-info`, method: 'get', params })
+}
+
 export function getAdminSubmission(id) {
   return request({ url: `/admin/assignments/submissions/${id}`, method: 'get' })
 }

@@ -91,6 +91,26 @@ start_frontend_or_reload_nginx() {
   fi
 }
 
+confirm_data_overwrite() {
+  if [[ "${ALLOW_DATA_OVERWRITE:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -t 0 ]]; then
+    read -r -p "Package contains data/learning-templates. Overwrite server templates after backup? [y/N] " answer
+    [[ "$answer" == "y" || "$answer" == "Y" ]]
+    return
+  fi
+  return 1
+}
+
+backup_data_dir() {
+  local source_dir="$1"
+  local backup_name="$2"
+  if [[ -d "$source_dir" ]]; then
+    cp -a "$source_dir" "$BACKUP_DIR/$backup_name"
+  fi
+}
+
 APP_CONFIG="$BASE_DIR/backend/application.properties"
 if [[ -f "$APP_CONFIG" ]]; then
   cp -a "$APP_CONFIG" "$BACKUP_DIR/application.properties"
@@ -121,9 +141,14 @@ rm -rf "$BASE_DIR/frontend/dist"
 cp -a "$PACKAGE_DIR/frontend/dist" "$BASE_DIR/frontend/dist"
 
 if [[ -d "$PACKAGE_DIR/data/learning-templates" ]]; then
-  mkdir -p "$BASE_DIR/data/learning-templates"
-  [[ -d "$BASE_DIR/data/learning-templates" ]] && cp -a "$BASE_DIR/data/learning-templates" "$BACKUP_DIR/learning-templates"
-  cp -a "$PACKAGE_DIR/data/learning-templates"/item-* "$BASE_DIR/data/learning-templates/"
+  if confirm_data_overwrite; then
+    mkdir -p "$BASE_DIR/data/learning-templates"
+    backup_data_dir "$BASE_DIR/data/learning-templates" "learning-templates"
+    cp -a "$PACKAGE_DIR/data/learning-templates"/item-* "$BASE_DIR/data/learning-templates/"
+    echo "Template data updated after backup."
+  else
+    echo "Skipped data/learning-templates overwrite. Set ALLOW_DATA_OVERWRITE=1 to allow replacement."
+  fi
 fi
 
 start_backend

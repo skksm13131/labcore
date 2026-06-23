@@ -150,6 +150,17 @@ public final class AssignmentDtos {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    public static class BatchDownloadInfo {
+        private long fileCount;
+        private long totalBytes;
+        private long maxBytes;
+        private boolean allowed;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class MaterialDetail {
         private Long materialId;
         private Long assignmentId;

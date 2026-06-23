@@ -175,10 +175,10 @@ CREATE TABLE IF NOT EXISTS `assignment_submission_file` (
 
 -- Default admin account: admin / Admin@12345678.
 INSERT INTO `sys_user` (`username`, `password`, `display_name`, `role`, `status`, `created_time`, `updated_time`)
-VALUES ('admin', '$2a$10$q/sC6nZS7QzHX.n6YAa3VeiXPXhIoAKopzHOPjoUH2A1HNJXc6DrS', 'Admin', 'ADMIN', 'ACTIVE', NOW(), NOW())
+VALUES ('admin', '$2a$10$q/sC6nZS7QzHX.n6YAa3VeiXPXhIoAKopzHOPjoUH2A1HNJXc6DrS', '管理员', 'ADMIN', 'ACTIVE', NOW(), NOW())
 ON DUPLICATE KEY UPDATE
   `password` = VALUES(`password`),
-  `display_name` = 'Admin',
+  `display_name` = '管理员',
   `role` = 'ADMIN',
   `status` = 'ACTIVE',
   `updated_time` = NOW();

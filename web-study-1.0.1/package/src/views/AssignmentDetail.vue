@@ -251,7 +251,7 @@ const deleteFile = async file => {
   }
   const submission = await deleteSubmissionFile(file.fileId)
   if (detail.value) {
-    detail.value.mySubmission = submission
+    detail.value.mySubmission = submission || null
   }
   ElMessage.success('附件已删除')
 }

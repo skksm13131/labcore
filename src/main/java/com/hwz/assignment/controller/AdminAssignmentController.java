@@ -10,12 +10,10 @@ import com.hwz.common.Result;
 import com.hwz.common.entity.User;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.UnsupportedEncodingException;
@@ -105,14 +103,19 @@ public class AdminAssignmentController {
     public ResponseEntity<StreamingResponseBody> downloadSubmissionFiles(@PathVariable Long assignmentId,
                                                                          @RequestParam(required = false) String status) {
         accessService.requireAdmin();
-        if (assignmentService.countSubmissionFilesForZip(assignmentId, status) == 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "暂无可下载附件");
-        }
+        assignmentService.assertSubmissionFilesZipDownloadable(assignmentId, status);
         StreamingResponseBody body = outputStream -> assignmentService.writeSubmissionFilesZip(assignmentId, status, outputStream);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("application/zip"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(assignmentService.submissionFilesZipName(assignmentId)))
                 .body(body);
+    }
+
+    @GetMapping("/{assignmentId}/submissions/files/download-info")
+    public Result<AssignmentDtos.BatchDownloadInfo> submissionFilesDownloadInfo(@PathVariable Long assignmentId,
+                                                                                @RequestParam(required = false) String status) {
+        accessService.requireAdmin();
+        return Result.ok(assignmentService.getSubmissionFilesBatchDownloadInfo(assignmentId, status));
     }
 
     @GetMapping("/submissions/{submissionId}")

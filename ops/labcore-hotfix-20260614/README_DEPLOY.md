@@ -18,9 +18,21 @@ chmod +x deploy-update.sh
 bash deploy-update.sh /opt/learning-platform > /root/upload/deploy-result-20260614.txt 2>&1
 ```
 
+If you really need to overwrite server-side templates:
+
+```bash
+ALLOW_DATA_OVERWRITE=1 bash deploy-update.sh /opt/learning-platform > /root/upload/deploy-result-20260614.txt 2>&1
+```
+
 If the deployment directory is not `/opt/learning-platform`, replace it with the real path.
 
-The script backs up the current jar, frontend dist, `application.properties`, and `data/learning-templates` before replacement.
+The script always backs up the current jar, frontend dist, and `application.properties`.
+
+For `data/learning-templates`:
+
+- default behavior: skip overwrite
+- overwrite only when `ALLOW_DATA_OVERWRITE=1` is set, or when you confirm in an interactive shell
+- existing server templates are backed up before replacement
 
 ## 2. Verify
 

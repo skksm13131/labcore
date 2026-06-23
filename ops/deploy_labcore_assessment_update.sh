@@ -135,6 +135,8 @@ if [[ -f "$APP_CONFIG" ]]; then
   cp -a "$APP_CONFIG" "$BACKUP_DIR/application.properties"
   ensure_config_line "$APP_CONFIG" "labcore.assignment.upload-dir" "data/assignment-submissions"
   ensure_config_line "$APP_CONFIG" "labcore.assignment.material-dir" "data/assignment-materials"
+  ensure_config_line "$APP_CONFIG" "labcore.assignment.max-files-per-submission" "5"
+  ensure_config_line "$APP_CONFIG" "labcore.assignment.max-bytes-per-submission" "1073741824"
   ensure_config_line "$APP_CONFIG" "spring.servlet.multipart.max-file-size" "300MB"
   ensure_config_line "$APP_CONFIG" "spring.servlet.multipart.max-request-size" "330MB"
 fi

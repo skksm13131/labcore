@@ -16,6 +16,7 @@ import com.hwz.assignment.mapper.AssignmentSubmissionMapper;
 import com.hwz.common.PageResponse;
 import com.hwz.common.entity.User;
 import com.hwz.common.mapper.UserMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -53,6 +54,15 @@ public class AssignmentService {
     public static final String SUBMISSION_GRADED = "GRADED";
     public static final String SUBMISSION_RETURNED = "RETURNED";
     private static final String STATUS_NO_MATCH = "__NO_MATCH__";
+
+    @Value("${labcore.assignment.batch-download-max-bytes:21474836480}")
+    private long batchDownloadMaxBytes;
+
+    @Value("${labcore.assignment.max-files-per-submission:5}")
+    private long maxFilesPerSubmission;
+
+    @Value("${labcore.assignment.max-bytes-per-submission:1073741824}")
+    private long maxBytesPerSubmission;
 
     private final AssignmentMapper assignmentMapper;
     private final AssignmentQuestionMapper questionMapper;
@@ -161,7 +171,7 @@ public class AssignmentService {
     public AssignmentDtos.AssignmentDetail getStudentDetail(Long assignmentId, Long userId) {
         Assignment assignment = getAssignmentOrThrow(assignmentId);
         if (!STATUS_PUBLISHED.equalsIgnoreCase(assignment.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "考核不存在或尚未发布");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "\u8003\u6838\u4e0d\u5b58\u5728\u6216\u5c1a\u672a\u53d1\u5e03");
         }
         return toDetail(assignment, userId);
     }
@@ -251,6 +261,7 @@ public class AssignmentService {
         Assignment assignment = getPublishedAssignmentOrThrow(assignmentId);
         AssignmentSubmission submission = findOrCreateSubmission(assignment.getAssignmentId(), user.getId());
         ensureSubmissionEditable(submission);
+        ensureUploadQuota(submission.getSubmissionId(), file);
         AssignmentSubmissionFile stored = fileStorageService.store(assignmentId, user.getId(), submission.getSubmissionId(), fileType, file);
         fileMapper.insert(stored);
         return toSubmissionDetail(submissionMapper.selectById(submission.getSubmissionId()));
@@ -259,11 +270,21 @@ public class AssignmentService {
     @Transactional
     public AssignmentDtos.SubmissionDetail saveAnswer(Long assignmentId, User user, AssignmentDtos.AnswerSaveRequest request) {
         Assignment assignment = getPublishedAssignmentOrThrow(assignmentId);
-        AssignmentSubmission submission = findOrCreateSubmission(assignment.getAssignmentId(), user.getId());
+        String answerText = request == null ? null : request.getAnswerText();
+        AssignmentSubmission submission = findSubmission(assignment.getAssignmentId(), user.getId());
+        if (submission == null && !StringUtils.hasText(answerText)) {
+            return null;
+        }
+        if (submission == null) {
+            submission = findOrCreateSubmission(assignment.getAssignmentId(), user.getId());
+        }
         ensureSubmissionEditable(submission);
-        submission.setAnswerText(request == null ? null : request.getAnswerText());
+        submission.setAnswerText(answerText);
         submission.setUpdatedAt(LocalDateTime.now());
         submissionMapper.updateById(submission);
+        if (deleteIfEmptyDraft(submission)) {
+            return null;
+        }
         return toSubmissionDetail(submissionMapper.selectById(submission.getSubmissionId()));
     }
 
@@ -278,7 +299,7 @@ public class AssignmentService {
         boolean hasAnswer = StringUtils.hasText(submission.getAnswerText());
         boolean hasFiles = countFiles(submission.getSubmissionId()) > 0;
         if (!hasAnswer && !hasFiles) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请先填写文字答案或上传材料后再提交考核");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u8bf7\u5148\u586b\u5199\u6587\u5b57\u7b54\u6848\u6216\u4e0a\u4f20\u6750\u6599\u540e\u518d\u63d0\u4ea4\u8003\u6838");
         }
         LocalDateTime now = LocalDateTime.now();
         submission.setStatus(assignment.getDeadline() != null && now.isAfter(assignment.getDeadline())
@@ -293,15 +314,18 @@ public class AssignmentService {
     public AssignmentDtos.SubmissionDetail deleteStudentFile(Long fileId, User user) {
         AssignmentSubmissionFile file = fileMapper.selectById(fileId);
         if (file == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文件不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "\u6587\u4ef6\u4e0d\u5b58\u5728");
         }
         AssignmentSubmission submission = getSubmissionOrThrow(file.getSubmissionId());
         if (!submission.getStudentId().equals(user.getId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权删除该文件");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "\u65e0\u6743\u5220\u9664\u8be5\u6587\u4ef6");
         }
         ensureSubmissionEditable(submission);
         fileStorageService.delete(file);
         fileMapper.deleteById(fileId);
+        if (deleteIfEmptyDraft(submission)) {
+            return null;
+        }
         return toSubmissionDetail(submissionMapper.selectById(submission.getSubmissionId()));
     }
 
@@ -313,6 +337,8 @@ public class AssignmentService {
                 .orderByDesc(AssignmentSubmission::getUpdatedAt);
         if (StringUtils.hasText(status)) {
             wrapper.eq(AssignmentSubmission::getStatus, status.trim().toUpperCase());
+        } else {
+            wrapper.isNotNull(AssignmentSubmission::getSubmittedAt);
         }
         long total = submissionMapper.selectCount(wrapper);
         Page<AssignmentSubmission> result = submissionMapper.selectPage(new Page<>(page, pageSize), wrapper);
@@ -323,19 +349,37 @@ public class AssignmentService {
     }
 
     public long countSubmissionFilesForZip(Long assignmentId, String status) {
-        List<AssignmentSubmission> submissions = listSubmissionsForZip(assignmentId, status);
-        if (submissions.isEmpty()) {
-            return 0;
+        return getSubmissionFilesBatchDownloadInfo(assignmentId, status).getFileCount();
+    }
+
+    public AssignmentDtos.BatchDownloadInfo getSubmissionFilesBatchDownloadInfo(Long assignmentId, String status) {
+        List<AssignmentSubmissionFile> files = listSubmissionFilesForZip(assignmentId, status);
+        long totalBytes = files.stream()
+                .map(AssignmentSubmissionFile::getFileSize)
+                .filter(size -> size != null && size > 0)
+                .reduce(0L, Long::sum);
+        return AssignmentDtos.BatchDownloadInfo.builder()
+                .fileCount(files.size())
+                .totalBytes(totalBytes)
+                .maxBytes(batchDownloadMaxBytes)
+                .allowed(!files.isEmpty() && totalBytes <= batchDownloadMaxBytes)
+                .build();
+    }
+
+    public void assertSubmissionFilesZipDownloadable(Long assignmentId, String status) {
+        AssignmentDtos.BatchDownloadInfo info = getSubmissionFilesBatchDownloadInfo(assignmentId, status);
+        if (info.getFileCount() == 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u6682\u65e0\u53ef\u4e0b\u8f7d\u9644\u4ef6");
         }
-        return fileMapper.selectCount(new LambdaQueryWrapper<AssignmentSubmissionFile>()
-                .in(AssignmentSubmissionFile::getSubmissionId, submissions.stream()
-                        .map(AssignmentSubmission::getSubmissionId)
-                        .collect(Collectors.toList())));
+        if (info.getTotalBytes() > info.getMaxBytes()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "\u9644\u4ef6\u603b\u5927\u5c0f\u8d85\u8fc7\u6279\u91cf\u4e0b\u8f7d\u4e0a\u9650\uff0c\u8bf7\u6309\u72b6\u6001\u7b5b\u9009\u6216\u9010\u4e2a\u4e0b\u8f7d");
+        }
     }
 
     public String submissionFilesZipName(Long assignmentId) {
         Assignment assignment = getAssignmentOrThrow(assignmentId);
-        return sanitizeZipName(assignment.getTitle()) + "-提交附件.zip";
+        return sanitizeZipName(assignment.getTitle()) + "-\u63d0\u4ea4\u9644\u4ef6.zip";
     }
 
     public void writeSubmissionFilesZip(Long assignmentId, String status, OutputStream outputStream) throws IOException {
@@ -343,15 +387,7 @@ public class AssignmentService {
         List<AssignmentSubmission> submissions = listSubmissionsForZip(assignmentId, status);
         Map<Long, AssignmentSubmission> submissionMap = submissions.stream()
                 .collect(Collectors.toMap(AssignmentSubmission::getSubmissionId, item -> item));
-        List<Long> submissionIds = submissions.stream()
-                .map(AssignmentSubmission::getSubmissionId)
-                .collect(Collectors.toList());
-        List<AssignmentSubmissionFile> files = submissionIds.isEmpty() ? new ArrayList<>() : fileMapper.selectList(
-                new LambdaQueryWrapper<AssignmentSubmissionFile>()
-                        .in(AssignmentSubmissionFile::getSubmissionId, submissionIds)
-                        .orderByAsc(AssignmentSubmissionFile::getSubmissionId)
-                        .orderByAsc(AssignmentSubmissionFile::getCreatedAt)
-                        .orderByAsc(AssignmentSubmissionFile::getFileId));
+        List<AssignmentSubmissionFile> files = listSubmissionFilesForZip(assignmentId, status);
         Set<String> usedEntryNames = new HashSet<>();
         List<String> notes = new ArrayList<>();
         String rootDir = sanitizeZipName(assignment.getTitle());
@@ -375,11 +411,11 @@ public class AssignmentService {
                     }
                     zip.closeEntry();
                 } catch (Exception ex) {
-                    notes.add(entryName + "：文件不存在或读取失败");
+                    notes.add(entryName + "\uff1a\u6587\u4ef6\u4e0d\u5b58\u5728\u6216\u8bfb\u53d6\u5931\u8d25");
                 }
             }
             if (!notes.isEmpty()) {
-                zip.putNextEntry(new ZipEntry(rootDir + "/下载说明.txt"));
+                zip.putNextEntry(new ZipEntry(rootDir + "/\u4e0b\u8f7d\u8bf4\u660e.txt"));
                 zip.write(String.join("\n", notes).getBytes(StandardCharsets.UTF_8));
                 zip.closeEntry();
             }
@@ -394,7 +430,7 @@ public class AssignmentService {
     public AssignmentDtos.SubmissionDetail getStudentSubmission(Long submissionId, Long userId) {
         AssignmentSubmission submission = getSubmissionOrThrow(submissionId);
         if (!submission.getStudentId().equals(userId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权查看该提交");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "\u65e0\u6743\u67e5\u770b\u8be5\u63d0\u4ea4");
         }
         return toSubmissionDetail(submission);
     }
@@ -402,13 +438,14 @@ public class AssignmentService {
     @Transactional
     public AssignmentDtos.SubmissionDetail grade(Long submissionId, AssignmentDtos.GradeRequest request, User operator) {
         AssignmentSubmission submission = getSubmissionOrThrow(submissionId);
+        ensureSubmissionReviewable(submission);
         if (request == null || request.getScore() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请输入评分");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u8bf7\u8f93\u5165\u8bc4\u5206");
         }
         Assignment assignment = getAssignmentOrThrow(submission.getAssignmentId());
         BigDecimal maxScore = defaultScore(assignment.getTotalScore());
         if (request.getScore().compareTo(BigDecimal.ZERO) < 0 || request.getScore().compareTo(maxScore) > 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "评分必须在 0 到满分之间");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u8bc4\u5206\u5fc5\u987b\u5728 0 \u5230\u6ee1\u5206\u4e4b\u95f4");
         }
         LocalDateTime now = LocalDateTime.now();
         submission.setScore(request.getScore());
@@ -424,6 +461,7 @@ public class AssignmentService {
     @Transactional
     public AssignmentDtos.SubmissionDetail returnSubmission(Long submissionId, AssignmentDtos.GradeRequest request, User operator) {
         AssignmentSubmission submission = getSubmissionOrThrow(submissionId);
+        ensureSubmissionReviewable(submission);
         LocalDateTime now = LocalDateTime.now();
         submission.setScore(null);
         submission.setFeedback(request == null ? null : request.getFeedback());
@@ -438,11 +476,14 @@ public class AssignmentService {
     public AssignmentSubmissionFile getFileForDownload(Long fileId, User user, boolean admin) {
         AssignmentSubmissionFile file = fileMapper.selectById(fileId);
         if (file == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文件不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "\u6587\u4ef6\u4e0d\u5b58\u5728");
         }
         AssignmentSubmission submission = getSubmissionOrThrow(file.getSubmissionId());
+        if (admin && (submission.getSubmittedAt() == null || SUBMISSION_DRAFT.equalsIgnoreCase(submission.getStatus()))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u8be5\u9644\u4ef6\u5c1a\u672a\u63d0\u4ea4\uff0c\u7ba1\u7406\u5458\u4e0d\u80fd\u4e0b\u8f7d");
+        }
         if (!admin && !submission.getStudentId().equals(user.getId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权下载该文件");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "\u65e0\u6743\u4e0b\u8f7d\u8be5\u6587\u4ef6");
         }
         return file;
     }
@@ -455,7 +496,7 @@ public class AssignmentService {
         AssignmentMaterial material = getMaterialOrThrow(materialId);
         Assignment assignment = getAssignmentOrThrow(material.getAssignmentId());
         if (!admin && !STATUS_PUBLISHED.equalsIgnoreCase(assignment.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "材料不存在或考核尚未发布");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "\u6750\u6599\u4e0d\u5b58\u5728\u6216\u8003\u6838\u5c1a\u672a\u53d1\u5e03");
         }
         return material;
     }
@@ -494,6 +535,8 @@ public class AssignmentService {
                 .in(AssignmentSubmission::getAssignmentId, assignmentIds);
         if (StringUtils.hasText(status)) {
             wrapper.eq(AssignmentSubmission::getStatus, status);
+        } else {
+            wrapper.isNotNull(AssignmentSubmission::getSubmittedAt);
         }
         return submissionMapper.selectCount(wrapper);
     }
@@ -503,15 +546,38 @@ public class AssignmentService {
         LambdaQueryWrapper<AssignmentSubmission> wrapper = new LambdaQueryWrapper<AssignmentSubmission>()
                 .eq(AssignmentSubmission::getAssignmentId, assignmentId);
         if (StringUtils.hasText(status)) {
-            wrapper.eq(AssignmentSubmission::getStatus, status.trim().toUpperCase());
+            String normalizedStatus = status.trim().toUpperCase();
+            if (SUBMISSION_DRAFT.equals(normalizedStatus)) {
+                return new ArrayList<>();
+            }
+            wrapper.eq(AssignmentSubmission::getStatus, normalizedStatus)
+                    .isNotNull(AssignmentSubmission::getSubmittedAt);
+        } else {
+            wrapper.isNotNull(AssignmentSubmission::getSubmittedAt);
         }
         return submissionMapper.selectList(wrapper);
+    }
+
+    private List<AssignmentSubmissionFile> listSubmissionFilesForZip(Long assignmentId, String status) {
+        List<AssignmentSubmission> submissions = listSubmissionsForZip(assignmentId, status);
+        List<Long> submissionIds = submissions.stream()
+                .map(AssignmentSubmission::getSubmissionId)
+                .collect(Collectors.toList());
+        if (submissionIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return fileMapper.selectList(new LambdaQueryWrapper<AssignmentSubmissionFile>()
+                .in(AssignmentSubmissionFile::getSubmissionId, submissionIds)
+                .orderByAsc(AssignmentSubmissionFile::getSubmissionId)
+                .orderByAsc(AssignmentSubmissionFile::getCreatedAt)
+                .orderByAsc(AssignmentSubmissionFile::getFileId));
     }
 
     private AssignmentDtos.AssignmentSummary toAdminSummary(Assignment assignment) {
         AssignmentDtos.AssignmentSummary summary = toSummary(assignment);
         summary.setSubmissionCount(submissionMapper.selectCount(new LambdaQueryWrapper<AssignmentSubmission>()
-                .eq(AssignmentSubmission::getAssignmentId, assignment.getAssignmentId())));
+                .eq(AssignmentSubmission::getAssignmentId, assignment.getAssignmentId())
+                .isNotNull(AssignmentSubmission::getSubmittedAt)));
         summary.setGradedCount(submissionMapper.selectCount(new LambdaQueryWrapper<AssignmentSubmission>()
                 .eq(AssignmentSubmission::getAssignmentId, assignment.getAssignmentId())
                 .eq(AssignmentSubmission::getStatus, SUBMISSION_GRADED)));
@@ -556,7 +622,8 @@ public class AssignmentService {
                 .materials(listMaterialDetails(assignment.getAssignmentId()))
                 .mySubmission(mySubmission)
                 .submissionCount(submissionMapper.selectCount(new LambdaQueryWrapper<AssignmentSubmission>()
-                        .eq(AssignmentSubmission::getAssignmentId, assignment.getAssignmentId())))
+                        .eq(AssignmentSubmission::getAssignmentId, assignment.getAssignmentId())
+                        .isNotNull(AssignmentSubmission::getSubmittedAt)))
                 .gradedCount(submissionMapper.selectCount(new LambdaQueryWrapper<AssignmentSubmission>()
                         .eq(AssignmentSubmission::getAssignmentId, assignment.getAssignmentId())
                         .eq(AssignmentSubmission::getStatus, SUBMISSION_GRADED)))
@@ -681,7 +748,7 @@ public class AssignmentService {
     private Assignment getAssignmentOrThrow(Long assignmentId) {
         Assignment assignment = assignmentMapper.selectById(assignmentId);
         if (assignment == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "考核不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "\u8003\u6838\u4e0d\u5b58\u5728");
         }
         return assignment;
     }
@@ -689,7 +756,7 @@ public class AssignmentService {
     private Assignment getPublishedAssignmentOrThrow(Long assignmentId) {
         Assignment assignment = getAssignmentOrThrow(assignmentId);
         if (!STATUS_PUBLISHED.equalsIgnoreCase(assignment.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "考核不存在或尚未发布");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "\u8003\u6838\u4e0d\u5b58\u5728\u6216\u5c1a\u672a\u53d1\u5e03");
         }
         return assignment;
     }
@@ -697,7 +764,7 @@ public class AssignmentService {
     private AssignmentSubmission getSubmissionOrThrow(Long submissionId) {
         AssignmentSubmission submission = submissionMapper.selectById(submissionId);
         if (submission == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "提交记录不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "\u63d0\u4ea4\u8bb0\u5f55\u4e0d\u5b58\u5728");
         }
         return submission;
     }
@@ -705,7 +772,7 @@ public class AssignmentService {
     private AssignmentMaterial getMaterialOrThrow(Long materialId) {
         AssignmentMaterial material = materialMapper.selectById(materialId);
         if (material == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "材料不存在");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "\u6750\u6599\u4e0d\u5b58\u5728");
         }
         return material;
     }
@@ -715,7 +782,7 @@ public class AssignmentService {
             return;
         }
         if (SUBMISSION_GRADED.equalsIgnoreCase(submission.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "已评分的提交不能再修改");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u5df2\u8bc4\u5206\u7684\u63d0\u4ea4\u4e0d\u80fd\u518d\u4fee\u6539");
         }
     }
 
@@ -751,16 +818,73 @@ public class AssignmentService {
                 .eq(AssignmentSubmissionFile::getSubmissionId, submissionId));
     }
 
+    private long sumFileBytes(Long submissionId) {
+        if (submissionId == null) {
+            return 0;
+        }
+        return fileMapper.selectList(new LambdaQueryWrapper<AssignmentSubmissionFile>()
+                        .eq(AssignmentSubmissionFile::getSubmissionId, submissionId))
+                .stream()
+                .map(AssignmentSubmissionFile::getFileSize)
+                .filter(size -> size != null && size > 0)
+                .reduce(0L, Long::sum);
+    }
+
+    private void ensureUploadQuota(Long submissionId, MultipartFile file) {
+        long currentCount = countFiles(submissionId);
+        if (maxFilesPerSubmission > 0 && currentCount >= maxFilesPerSubmission) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "\u6bcf\u4e2a\u8003\u6838\u6700\u591a\u4e0a\u4f20 " + maxFilesPerSubmission + " \u4e2a\u9644\u4ef6\uff0c\u8bf7\u5220\u9664\u65e7\u6587\u4ef6\u540e\u518d\u4e0a\u4f20");
+        }
+        long incomingBytes = file == null ? 0 : Math.max(file.getSize(), 0);
+        long currentBytes = sumFileBytes(submissionId);
+        if (maxBytesPerSubmission > 0 && currentBytes + incomingBytes > maxBytesPerSubmission) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "\u6bcf\u4e2a\u8003\u6838\u9644\u4ef6\u603b\u5927\u5c0f\u4e0d\u80fd\u8d85\u8fc7 " + formatBytes(maxBytesPerSubmission) + "\uff0c\u8bf7\u538b\u7f29\u89c6\u9891\u6216\u5220\u9664\u65e7\u6587\u4ef6\u540e\u518d\u4e0a\u4f20");
+        }
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes >= 1024L * 1024L * 1024L) {
+            return String.format("%.1fGB", bytes / 1024.0 / 1024.0 / 1024.0);
+        }
+        if (bytes >= 1024L * 1024L) {
+            return String.format("%.0fMB", bytes / 1024.0 / 1024.0);
+        }
+        if (bytes >= 1024L) {
+            return String.format("%.0fKB", bytes / 1024.0);
+        }
+        return bytes + "B";
+    }
+
+    private boolean deleteIfEmptyDraft(AssignmentSubmission submission) {
+        if (submission == null || !SUBMISSION_DRAFT.equalsIgnoreCase(submission.getStatus())) {
+            return false;
+        }
+        if (StringUtils.hasText(submission.getAnswerText()) || countFiles(submission.getSubmissionId()) > 0) {
+            return false;
+        }
+        submissionMapper.deleteById(submission.getSubmissionId());
+        return true;
+    }
+
+    private void ensureSubmissionReviewable(AssignmentSubmission submission) {
+        if (submission == null || submission.getSubmittedAt() == null || SUBMISSION_DRAFT.equalsIgnoreCase(submission.getStatus())
+                || SUBMISSION_RETURNED.equalsIgnoreCase(submission.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u8be5\u8bb0\u5f55\u5c1a\u672a\u63d0\u4ea4\uff0c\u4e0d\u80fd\u8bc4\u5206\u6216\u9000\u56de");
+        }
+    }
+
     private void validateSaveRequest(AssignmentDtos.AssignmentSaveRequest request) {
         if (request == null || !StringUtils.hasText(request.getTitle())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请输入考核标题");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u8bf7\u8f93\u5165\u8003\u6838\u6807\u9898");
         }
     }
 
     private String normalizeAssignmentStatus(String status) {
         String normalized = StringUtils.hasText(status) ? status.trim().toUpperCase() : "";
         if (!STATUS_DRAFT.equals(normalized) && !STATUS_PUBLISHED.equals(normalized) && !STATUS_ARCHIVED.equals(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "考核状态不正确");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u8003\u6838\u72b6\u6001\u4e0d\u6b63\u786e");
         }
         return normalized;
     }
@@ -771,7 +895,7 @@ public class AssignmentService {
 
     private String displayName(User user) {
         if (user == null) {
-            return "未知用户";
+            return "\u672a\u77e5\u7528\u6237";
         }
         if (StringUtils.hasText(user.getDisplayName())) {
             return user.getDisplayName();
@@ -784,13 +908,13 @@ public class AssignmentService {
 
     private String fileTypeText(String fileType) {
         if ("VIDEO".equalsIgnoreCase(fileType)) {
-            return "视频";
+            return "\u89c6\u9891";
         }
-        return "文档";
+        return "\u6587\u6863";
     }
 
     private String sanitizeZipName(String name) {
-        String safe = StringUtils.hasText(name) ? name.trim() : "未命名";
+        String safe = StringUtils.hasText(name) ? name.trim() : "\u8003\u6838";
         safe = safe.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]+", "_");
         safe = safe.replaceAll("\\s+", " ");
         return safe.length() > 120 ? safe.substring(0, 120) : safe;

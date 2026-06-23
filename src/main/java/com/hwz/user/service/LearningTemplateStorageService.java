@@ -3,9 +3,11 @@ package com.hwz.user.service;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -55,6 +57,17 @@ public class LearningTemplateStorageService {
     }
 
     private Path resolvePath(String templatePath) {
-        return storageRoot.resolve(templatePath).normalize();
+        if (!StringUtils.hasText(templatePath)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u6a21\u677f\u8def\u5f84\u4e0d\u80fd\u4e3a\u7a7a");
+        }
+        Path relativePath = Paths.get(templatePath);
+        if (relativePath.isAbsolute()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u6a21\u677f\u8def\u5f84\u4e0d\u5408\u6cd5");
+        }
+        Path resolvedPath = storageRoot.resolve(relativePath).normalize();
+        if (!resolvedPath.startsWith(storageRoot)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u6a21\u677f\u8def\u5f84\u4e0d\u5408\u6cd5");
+        }
+        return resolvedPath;
     }
 }

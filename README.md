@@ -211,3 +211,19 @@ git push origin master
 ```
 
 部署压缩包、jar、前端 dist、缓存目录和 Python 编译缓存已通过 `.gitignore` 排除，不应提交到仓库。
+## 2026-06-23 配置与部署补充
+
+- `src/main/resources/application.properties` 和 `application.properties.example` 现在都支持环境变量覆盖。常用变量包括：
+  `LABCORE_DB_URL`、`LABCORE_DB_USERNAME`、`LABCORE_DB_PASSWORD`、`LABCORE_TOKEN_SECRET`、
+  `LABCORE_CORS_ALLOWED_ORIGINS`、`LABCORE_ASSIGNMENT_MAX_FILES_PER_SUBMISSION`、
+  `LABCORE_ASSIGNMENT_MAX_BYTES_PER_SUBMISSION`。
+- `src/main/resources/application.properties` 中的 `123456` 仅用于本地或内网测试默认值，不应直接用于正式教学服务器。
+- 默认管理员密码 `Admin@12345678` 仅用于初始化。首次部署后必须立即登录后台修改密码。
+- 作业上传新增两项限制，默认值为：
+  `labcore.assignment.max-files-per-submission=5`
+  `labcore.assignment.max-bytes-per-submission=1073741824`
+  即每个学生在单个考核下最多 5 个附件、总大小 1GB。
+- 后端 CORS 地址已改为配置项 `labcore.cors.allowed-origins`，内网部署时直接按逗号分隔填写实际地址即可。
+- `ops/labcore-codeonly-20260614/deploy-codeonly.sh` 仍然是默认推荐方式，不会覆盖 `data/`。
+- `ops/labcore-hotfix-20260614/deploy-update.sh` 在检测到包内含 `data/learning-templates` 时，默认跳过覆盖。
+  只有显式设置 `ALLOW_DATA_OVERWRITE=1`，或在交互终端中确认后，才会覆盖模板目录，并且会先备份现有模板目录。

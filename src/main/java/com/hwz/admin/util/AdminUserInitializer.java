@@ -49,7 +49,7 @@ public class AdminUserInitializer implements CommandLineRunner {
                 admin = User.builder()
                         .username(DEFAULT_ADMIN_USERNAME)
                         .password(passwordEncoder.encode(defaultAdminPassword))
-                        .displayName("Admin")
+                        .displayName("管理员")
                         .role(User.Role.ADMIN)
                         .status(User.Status.ACTIVE)
                         .createdTime(now)

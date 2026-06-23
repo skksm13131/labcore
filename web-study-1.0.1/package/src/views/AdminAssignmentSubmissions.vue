@@ -37,7 +37,14 @@
               <el-option label="已评分" value="GRADED" />
               <el-option label="已退回" value="RETURNED" />
             </el-select>
-            <el-button class="batch-download-button" type="primary" plain @click="downloadBatchFiles">
+            <el-button
+              class="batch-download-button"
+              type="primary"
+              plain
+              :loading="batchDownloadLoading"
+              :disabled="batchDownloadLoading"
+              @click="downloadBatchFiles"
+            >
               批量下载附件
             </el-button>
           </div>
@@ -142,8 +149,8 @@
                 </el-form-item>
               </el-form>
               <div class="grade-actions">
-                <el-button type="warning" plain @click="returnCurrent">退回重交</el-button>
-                <el-button type="primary" @click="gradeCurrent">保存评分</el-button>
+                <el-button type="warning" plain :disabled="!canReviewCurrent" @click="returnCurrent">退回重交</el-button>
+                <el-button type="primary" :disabled="!canReviewCurrent" @click="gradeCurrent">保存评分</el-button>
               </div>
             </section>
           </template>
@@ -154,13 +161,14 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import {
   getAdminAssignment,
   getAdminAssignmentSubmissions,
+  getAdminSubmissionBatchDownloadInfo,
   getAdminSubmission,
   gradeSubmission,
   returnSubmission
@@ -179,7 +187,12 @@ const submissionStatus = ref('')
 const page = ref(1)
 const pageSize = ref(10)
 const submissionsTotal = ref(0)
+const batchDownloadLoading = ref(false)
 const gradeForm = reactive({ score: null, feedback: '' })
+const canReviewCurrent = computed(() => {
+  const submission = submissionDetail.value
+  return Boolean(submission?.submittedAt && submission.status !== 'DRAFT' && submission.status !== 'RETURNED')
+})
 
 const loadAssignment = async () => {
   assignmentLoading.value = true
@@ -241,13 +254,44 @@ const refreshSelected = async () => {
 
 const downloadAdminFile = file => downloadWithAuth(`/admin/assignments/files/${file.fileId}/download`, file.originalName)
 
-const downloadBatchFiles = () => {
+const downloadBatchFiles = async () => {
   const query = submissionStatus.value ? `?status=${encodeURIComponent(submissionStatus.value)}` : ''
   const fallback = `${assignment.value?.title || '考核'}-提交附件.zip`
-  downloadWithAuth(`/admin/assignments/${assignmentId}/submissions/files/download${query}`, fallback)
+  batchDownloadLoading.value = true
+  try {
+    const info = await getAdminSubmissionBatchDownloadInfo(assignmentId, { status: submissionStatus.value })
+    if (!info.fileCount) {
+      ElMessage.warning('暂无可下载附件')
+      return
+    }
+    if (!info.allowed) {
+      ElMessage.error(`附件总大小 ${formatSize(info.totalBytes)}，超过批量下载上限 ${formatSize(info.maxBytes)}，请按状态筛选或逐个下载`)
+      return
+    }
+    if (!supportsStreamDownload() && info.totalBytes > 1024 * 1024 * 1024) {
+      ElMessage.error('当前浏览器不支持大文件流式保存，请使用 Chrome/Edge 下载，或按状态筛选后分批下载')
+      return
+    }
+    await ElMessageBox.confirm(
+      `将下载 ${info.fileCount} 个附件，估算大小 ${formatSize(info.totalBytes)}。下载期间请不要关闭页面。`,
+      '确认批量下载',
+      { type: 'warning', confirmButtonText: '开始下载', cancelButtonText: '取消' }
+    )
+    await downloadWithAuth(`/admin/assignments/${assignmentId}/submissions/files/download${query}`, fallback, { streamToDisk: true })
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close' && error?.name !== 'AbortError') {
+      console.error(error)
+    }
+  } finally {
+    batchDownloadLoading.value = false
+  }
 }
 
-const downloadWithAuth = async (url, fallbackName) => {
+const downloadWithAuth = async (url, fallbackName, options = {}) => {
+  if (options.streamToDisk && supportsStreamDownload()) {
+    await downloadStreamToDisk(url, fallbackName)
+    return
+  }
   const prefix = import.meta.env.VITE_API_BASE_URL || '/api'
   const response = await fetch(`${prefix}${url}`, {
     headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
@@ -264,6 +308,31 @@ const downloadWithAuth = async (url, fallbackName) => {
   link.click()
   URL.revokeObjectURL(link.href)
 }
+
+const downloadStreamToDisk = async (url, fallbackName) => {
+  const fileHandle = await window.showSaveFilePicker({
+    suggestedName: fallbackName || 'download.zip',
+    types: [{ description: 'ZIP 文件', accept: { 'application/zip': ['.zip'] } }]
+  })
+  const prefix = import.meta.env.VITE_API_BASE_URL || '/api'
+  const response = await fetch(`${prefix}${url}`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
+  })
+  if (!response.ok) {
+    const errorText = await response.text()
+    ElMessage.error(resolveErrorMessage(errorText) || '下载失败，请稍后重试')
+    return
+  }
+  const writable = await fileHandle.createWritable()
+  try {
+    await response.body.pipeTo(writable)
+  } catch (error) {
+    await writable.abort()
+    throw error
+  }
+}
+
+const supportsStreamDownload = () => Boolean(window.showSaveFilePicker && window.ReadableStream && window.WritableStream)
 
 const resolveDownloadName = (response, fallback) => {
   const disposition = response.headers.get('Content-Disposition') || ''
