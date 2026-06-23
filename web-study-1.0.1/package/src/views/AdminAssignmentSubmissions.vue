@@ -49,6 +49,14 @@
             </el-button>
           </div>
 
+          <div v-if="downloadProgress.visible" class="transfer-progress">
+            <div class="transfer-progress-head">
+              <span>{{ downloadProgress.name }}</span>
+              <strong>{{ downloadProgress.label }}</strong>
+            </div>
+            <el-progress :percentage="downloadProgress.percent" :indeterminate="downloadProgress.indeterminate" />
+          </div>
+
           <div v-loading="submissionsLoading" class="submission-list">
             <button
               v-for="row in submissions"
@@ -188,6 +196,7 @@ const page = ref(1)
 const pageSize = ref(10)
 const submissionsTotal = ref(0)
 const batchDownloadLoading = ref(false)
+const downloadProgress = ref({ visible: false, name: '', percent: 0, label: '', indeterminate: false })
 const gradeForm = reactive({ score: null, feedback: '' })
 const canReviewCurrent = computed(() => {
   const submission = submissionDetail.value
@@ -277,7 +286,7 @@ const downloadBatchFiles = async () => {
       '确认批量下载',
       { type: 'warning', confirmButtonText: '开始下载', cancelButtonText: '取消' }
     )
-    await downloadWithAuth(`/admin/assignments/${assignmentId}/submissions/files/download${query}`, fallback, { streamToDisk: true })
+    await downloadWithAuth(`/admin/assignments/${assignmentId}/submissions/files/download${query}`, fallback, { streamToDisk: true, expectedBytes: info.totalBytes })
   } catch (error) {
     if (error !== 'cancel' && error !== 'close' && error?.name !== 'AbortError') {
       console.error(error)
@@ -301,7 +310,7 @@ const downloadWithAuth = async (url, fallbackName, options = {}) => {
     ElMessage.error(resolveErrorMessage(errorText) || '下载失败，请稍后重试')
     return
   }
-  const blob = await response.blob()
+  const blob = await readResponseBlobWithProgress(response, fallbackName || 'download')
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
   link.download = resolveDownloadName(response, fallbackName)
@@ -324,12 +333,87 @@ const downloadStreamToDisk = async (url, fallbackName) => {
     return
   }
   const writable = await fileHandle.createWritable()
+  const total = Number(response.headers.get('Content-Length') || 0)
+  const reader = response.body?.getReader()
+  if (!reader) {
+    const blob = await response.blob()
+    await writable.write(blob)
+    await writable.close()
+    return
+  }
+  downloadProgress.value = {
+    visible: true,
+    name: fallbackName || 'download.zip',
+    percent: 0,
+    label: total ? '0%' : 'Downloading',
+    indeterminate: !total
+  }
   try {
-    await response.body.pipeTo(writable)
+    let loaded = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      await writable.write(value)
+      loaded += value.length
+      updateDownloadProgress(loaded, total)
+    }
+    downloadProgress.value.percent = 100
+    downloadProgress.value.label = '100%'
+    await writable.close()
   } catch (error) {
     await writable.abort()
     throw error
+  } finally {
+    window.setTimeout(resetDownloadProgress, 800)
   }
+}
+
+const readResponseBlobWithProgress = async (response, name) => {
+  const total = Number(response.headers.get('Content-Length') || 0)
+  downloadProgress.value = {
+    visible: true,
+    name,
+    percent: 0,
+    label: total ? '0%' : 'Downloading',
+    indeterminate: !total
+  }
+  try {
+    if (!response.body || !response.body.getReader) {
+      const blob = await response.blob()
+      downloadProgress.value.percent = 100
+      downloadProgress.value.label = '100%'
+      return blob
+    }
+    const reader = response.body.getReader()
+    const chunks = []
+    let loaded = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      loaded += value.length
+      updateDownloadProgress(loaded, total)
+    }
+    downloadProgress.value.percent = 100
+    downloadProgress.value.label = '100%'
+    return new Blob(chunks)
+  } finally {
+    window.setTimeout(resetDownloadProgress, 800)
+  }
+}
+
+const updateDownloadProgress = (loaded, total) => {
+  if (total) {
+    const percent = Math.min(99, Math.round((loaded / total) * 100))
+    downloadProgress.value.percent = percent
+    downloadProgress.value.label = `${percent}%`
+    return
+  }
+  downloadProgress.value.label = formatSize(loaded)
+}
+
+const resetDownloadProgress = () => {
+  downloadProgress.value = { visible: false, name: '', percent: 0, label: '', indeterminate: false }
 }
 
 const supportsStreamDownload = () => Boolean(window.showSaveFilePicker && window.ReadableStream && window.WritableStream)
@@ -587,6 +671,35 @@ onMounted(loadPage)
 .pagination {
   justify-content: center;
   margin-top: 16px;
+}
+
+.transfer-progress {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #dbe7f3;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.transfer-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #486581;
+  font-size: 13px;
+}
+
+.transfer-progress-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-progress-head strong {
+  color: #102a43;
 }
 
 .detail-panel {

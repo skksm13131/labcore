@@ -37,10 +37,52 @@
         </div>
 
         <div class="menu-section">
-          <router-link to="/knowledge" class="menu-item" :class="{ active: isKnowledgeRoute }">
-            <el-icon><Reading /></el-icon>
-            <span>知识学习</span>
-          </router-link>
+          <div
+            class="menu-group"
+            :class="{ 'is-expanded': knowledgeExpanded, 'is-active': isKnowledgeRoute }"
+          >
+            <div
+              class="menu-item menu-item-expandable"
+              :class="{ active: isKnowledgeRoute, expanded: knowledgeExpanded }"
+              @click="toggleKnowledgeMenu"
+            >
+              <el-icon><Reading /></el-icon>
+              <span>知识学习</span>
+              <el-icon class="menu-expand-icon"><ArrowDown /></el-icon>
+            </div>
+
+            <transition name="submenu-slide">
+              <div v-show="knowledgeExpanded" class="submenu">
+                <button
+                  type="button"
+                  class="submenu-item"
+                  :class="{ active: isKnowledgeRoute && !selectedCategory }"
+                  style="transition-delay: 0ms"
+                  @click.stop="handleCategoryChange('')"
+                >
+                  全部分类
+                </button>
+                <template v-if="categoriesLoading">
+                  <button type="button" class="submenu-item submenu-item-muted" disabled>
+                    加载分类中…
+                  </button>
+                </template>
+                <template v-else>
+                  <button
+                    v-for="(category, index) in categories"
+                    :key="category"
+                    type="button"
+                    class="submenu-item"
+                    :class="{ active: isKnowledgeRoute && selectedCategory === category }"
+                    :style="{ transitionDelay: `${index * 35}ms` }"
+                    @click.stop="handleCategoryChange(category)"
+                  >
+                    {{ category }}
+                  </button>
+                </template>
+              </div>
+            </transition>
+          </div>
 
           <router-link
             to="/learn-dashboard"
@@ -70,19 +112,81 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessageBox } from 'element-plus'
-import { DataAnalysis, DocumentChecked, Menu, Reading } from '@element-plus/icons-vue'
+import { ArrowDown, DataAnalysis, DocumentChecked, Menu, Reading } from '@element-plus/icons-vue'
+import { getLearningItems } from '@/api/knowledge'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const categories = ref([])
+const selectedCategory = ref('')
+const categoriesLoading = ref(false)
+const knowledgeExpanded = ref(false)
 
 const isKnowledgeRoute = computed(() => {
   return route.path.startsWith('/knowledge') || route.path.startsWith('/learning/item/')
 })
+
+const canLoadCategories = computed(() => {
+  return authStore.isAuthenticated && !authStore.user?.mustChangePassword
+})
+
+const unwrapData = payload => {
+  if (payload && payload.data !== undefined) {
+    return payload.data
+  }
+  return payload
+}
+
+const loadCategories = async () => {
+  if (!canLoadCategories.value) {
+    categories.value = []
+    return
+  }
+  categoriesLoading.value = true
+  try {
+    const res = await getLearningItems()
+    const list = unwrapData(res)
+    const values = new Set()
+    if (Array.isArray(list)) {
+      list.forEach(item => {
+        if (item.category) {
+          values.add(item.category)
+        }
+      })
+    }
+    categories.value = Array.from(values).sort()
+  } catch (error) {
+    categories.value = []
+    console.error('学习分类加载失败:', error)
+  } finally {
+    categoriesLoading.value = false
+  }
+}
+
+const syncCategoryFromRoute = () => {
+  selectedCategory.value = typeof route.query.category === 'string' ? route.query.category : ''
+}
+
+const handleCategoryChange = value => {
+  const category = value || ''
+  const query = { ...route.query }
+  if (category) {
+    query.category = category
+  } else {
+    delete query.category
+  }
+  knowledgeExpanded.value = true
+  router.push({ path: '/knowledge', query }).catch(() => {})
+}
+
+const toggleKnowledgeMenu = () => {
+  knowledgeExpanded.value = !knowledgeExpanded.value
+}
 
 const handleLogout = async () => {
   try {
@@ -123,6 +227,37 @@ const handleUserCommand = command => {
     handleLogout()
   }
 }
+
+onMounted(() => {
+  syncCategoryFromRoute()
+  loadCategories()
+})
+
+watch(
+  () => route.query.category,
+  () => {
+    syncCategoryFromRoute()
+  }
+)
+
+watch(
+  isKnowledgeRoute,
+  onKnowledgeRoute => {
+    if (onKnowledgeRoute) {
+      knowledgeExpanded.value = true
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  canLoadCategories,
+  allowed => {
+    if (allowed && categories.value.length === 0) {
+      loadCategories()
+    }
+  }
+)
 </script>
 
 <style scoped>
@@ -220,6 +355,142 @@ const handleUserCommand = command => {
   margin-bottom: 15px;
 }
 
+.menu-group {
+  margin-bottom: 8px;
+  transition:
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    margin-bottom 0.3s ease;
+}
+.menu-group.is-expanded:hover,
+.menu-group.is-expanded.is-active {
+  transform: translateX(4px) translateY(-1px);
+}
+.menu-group.is-expanded .menu-item-expandable:hover {
+  transform: none;
+}
+.menu-group.is-expanded {
+  margin-bottom: 18px;
+}
+
+.menu-group.is-expanded::after {
+  content: '';
+  display: block;
+  margin: 12px 18px 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #cbd5e1 15%, #94a3b8 50%, #cbd5e1 85%, transparent);
+}
+
+.menu-item-expandable {
+  cursor: pointer;
+}
+
+.menu-group.is-expanded .menu-item-expandable {
+  margin-bottom: 0;
+  border: 1px solid #bfdbfe;
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
+}
+
+.menu-expand-icon {
+  margin-left: auto;
+  font-size: 14px;
+  transition: transform 0.45s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+.menu-item.expanded .menu-expand-icon {
+  transform: rotate(180deg);
+}
+
+.submenu-slide-enter-active,
+.submenu-slide-leave-active {
+  overflow: hidden;
+  transition:
+    max-height 0.42s cubic-bezier(0.34, 1.15, 0.64, 1),
+    opacity 0.32s ease,
+    transform 0.42s cubic-bezier(0.34, 1.15, 0.64, 1),
+    padding 0.42s cubic-bezier(0.34, 1.15, 0.64, 1);
+}
+
+.submenu-slide-enter-from,
+.submenu-slide-leave-to {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-6px);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.submenu-slide-enter-to,
+.submenu-slide-leave-from {
+  max-height: 480px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.submenu {
+  margin: 0 10px 8px 10px;
+  padding: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.menu-group.is-expanded .submenu {
+  padding: 0;
+  background: linear-gradient(180deg, #f8fbff 0%, #eff6ff 100%);
+  border: 1px solid #bfdbfe;
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.12);
+}
+
+.submenu-item {
+  display: block;
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  text-align: left;
+  padding: 0 20px;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 40px;
+  cursor: pointer;
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease,
+    opacity 0.3s ease,
+    transform 0.35s cubic-bezier(0.34, 1.15, 0.64, 1);
+}
+
+.submenu-slide-enter-from .submenu-item,
+.submenu-slide-leave-to .submenu-item {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.submenu-item:hover:not(:disabled) {
+  background: rgba(219, 234, 254, 0.85);
+  color: #1d4ed8;
+}
+
+.submenu-item.active {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.submenu-item-muted {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .menu-item {
   display: flex;
   align-items: center;
@@ -251,7 +522,6 @@ const handleUserCommand = command => {
   font-weight: 600;
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
   border-color: #3b82f6;
-  transform: translateX(4px) translateY(-1px);
 }
 
 .main-content {

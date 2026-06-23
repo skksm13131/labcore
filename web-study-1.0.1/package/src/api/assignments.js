@@ -16,7 +16,7 @@ export function createSubmission(id) {
   return request({ url: `/assignments/${id}/submissions`, method: 'post' })
 }
 
-export function uploadSubmissionFile(id, fileType, file) {
+export function uploadSubmissionFile(id, fileType, file, options = {}) {
   const formData = new FormData()
   formData.append('fileType', fileType)
   formData.append('file', file)
@@ -24,7 +24,8 @@ export function uploadSubmissionFile(id, fileType, file) {
     url: `/assignments/${id}/files`,
     method: 'post',
     data: formData,
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: options.onUploadProgress
   })
 }
 
@@ -64,7 +65,7 @@ export function updateAdminAssignmentStatus(id, status) {
   return request({ url: `/admin/assignments/${id}/status`, method: 'put', data: { status } })
 }
 
-export function uploadAdminAssignmentMaterial(id, materialType, file, title = '') {
+export function uploadAdminAssignmentMaterial(id, materialType, file, title = '', options = {}) {
   const formData = new FormData()
   formData.append('materialType', materialType)
   formData.append('file', file)
@@ -75,7 +76,8 @@ export function uploadAdminAssignmentMaterial(id, materialType, file, title = ''
     url: `/admin/assignments/${id}/materials`,
     method: 'post',
     data: formData,
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: options.onUploadProgress
   })
 }
 

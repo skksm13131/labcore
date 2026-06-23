@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="assessment-detail-page">
     <div class="detail-shell">
       <section v-loading="loading" class="detail-hero">
@@ -87,11 +87,25 @@
             </div>
             <div class="upload-actions">
               <el-upload :auto-upload="false" :show-file-list="false" :on-change="file => uploadFile('DOCUMENT', file)">
-                <el-button :icon="Document" :disabled="locked">上传文档</el-button>
+                <el-button :icon="Document" :disabled="locked || uploadProgress.visible">上传文档</el-button>
               </el-upload>
               <el-upload :auto-upload="false" :show-file-list="false" :on-change="file => uploadFile('VIDEO', file)">
-                <el-button :icon="VideoPlay" :disabled="locked">上传视频</el-button>
+                <el-button :icon="VideoPlay" :disabled="locked || uploadProgress.visible">上传视频</el-button>
               </el-upload>
+            </div>
+            <div v-if="uploadProgress.visible" class="transfer-progress">
+              <div class="transfer-progress-head">
+                <span>{{ uploadProgress.name }}</span>
+                <strong>{{ uploadProgress.percent }}%</strong>
+              </div>
+              <el-progress :percentage="uploadProgress.percent" :status="uploadProgress.status" />
+            </div>
+            <div v-if="downloadProgress.visible" class="transfer-progress">
+              <div class="transfer-progress-head">
+                <span>{{ downloadProgress.name }}</span>
+                <strong>{{ downloadProgress.label }}</strong>
+              </div>
+              <el-progress :percentage="downloadProgress.percent" :indeterminate="downloadProgress.indeterminate" />
             </div>
             <el-table :data="detail.mySubmission?.files || []" size="small" stripe class="file-table">
               <el-table-column prop="originalName" label="文件名" min-width="180" />
@@ -155,6 +169,9 @@ const loading = ref(false)
 const answerText = ref('')
 const answerSaving = ref(false)
 const materialPreviewUrls = ref({})
+const uploadProgress = ref({ visible: false, name: '', percent: 0, status: '' })
+const downloadProgress = ref({ visible: false, name: '', percent: 0, label: '', indeterminate: false })
+const maxSingleUploadBytes = 300 * 1024 * 1024
 
 const assignmentId = computed(() => route.params.assignmentId)
 
@@ -233,9 +250,30 @@ const saveAnswer = async () => {
 const uploadFile = async (fileType, uploadFileInfo) => {
   if (locked.value) return
   if (!assignmentId.value || !uploadFileInfo?.raw) return
-  await uploadSubmissionFile(assignmentId.value, fileType, uploadFileInfo.raw)
-  ElMessage.success('上传成功')
-  await loadDetail()
+  const file = uploadFileInfo.raw
+  if (file.size > maxSingleUploadBytes) {
+    ElMessage.error(`单个文件不能超过 ${formatSize(maxSingleUploadBytes)}`)
+    return
+  }
+  uploadProgress.value = { visible: true, name: file.name || '上传附件', percent: 0, status: '' }
+  try {
+    await uploadSubmissionFile(assignmentId.value, fileType, file, {
+      onUploadProgress: event => {
+        if (!event.total) return
+        uploadProgress.value.percent = Math.min(99, Math.round((event.loaded / event.total) * 100))
+      }
+    })
+    uploadProgress.value.percent = 100
+    uploadProgress.value.status = 'success'
+    ElMessage.success('上传成功')
+    await loadDetail()
+  } catch (error) {
+    uploadProgress.value.status = 'exception'
+  } finally {
+    window.setTimeout(() => {
+      uploadProgress.value = { visible: false, name: '', percent: 0, status: '' }
+    }, 800)
+  }
 }
 
 const deleteFile = async file => {
@@ -271,7 +309,7 @@ const downloadFile = async file => {
     ElMessage.error('下载失败，请稍后重试')
     return
   }
-  const blob = await response.blob()
+  const blob = await readResponseBlobWithProgress(response, file.originalName || '下载附件')
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
   link.download = resolveDownloadName(response, file.originalName)
@@ -280,7 +318,7 @@ const downloadFile = async file => {
 }
 
 const downloadMaterial = async material => {
-  const blob = await fetchMaterialBlob(material)
+  const blob = await fetchMaterialBlob(material, { showProgress: true })
   if (!blob) return
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
@@ -289,7 +327,7 @@ const downloadMaterial = async material => {
   URL.revokeObjectURL(link.href)
 }
 
-const fetchMaterialBlob = async material => {
+const fetchMaterialBlob = async (material, options = {}) => {
   const prefix = import.meta.env.VITE_API_BASE_URL || '/api'
   const response = await fetch(`${prefix}/assignments/materials/${material.materialId}/download`, {
     headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
@@ -298,7 +336,56 @@ const fetchMaterialBlob = async material => {
     ElMessage.error('材料加载失败，请稍后重试')
     return null
   }
+  if (options.showProgress) {
+    return readResponseBlobWithProgress(response, material.originalName || material.title || '下载材料')
+  }
   return response.blob()
+}
+
+const readResponseBlobWithProgress = async (response, name) => {
+  const total = Number(response.headers.get('Content-Length') || 0)
+  downloadProgress.value = {
+    visible: true,
+    name,
+    percent: 0,
+    label: total ? '0%' : '下载中',
+    indeterminate: !total
+  }
+  try {
+    if (!response.body || !response.body.getReader) {
+      const blob = await response.blob()
+      downloadProgress.value.percent = 100
+      downloadProgress.value.label = '100%'
+      return blob
+    }
+    const reader = response.body.getReader()
+    const chunks = []
+    let loaded = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      loaded += value.length
+      updateDownloadProgress(loaded, total)
+    }
+    downloadProgress.value.percent = 100
+    downloadProgress.value.label = '100%'
+    return new Blob(chunks)
+  } finally {
+    window.setTimeout(() => {
+      downloadProgress.value = { visible: false, name: '', percent: 0, label: '', indeterminate: false }
+    }, 800)
+  }
+}
+
+const updateDownloadProgress = (loaded, total) => {
+  if (total) {
+    const percent = Math.min(99, Math.round((loaded / total) * 100))
+    downloadProgress.value.percent = percent
+    downloadProgress.value.label = `${percent}%`
+    return
+  }
+  downloadProgress.value.label = formatSize(loaded)
 }
 
 const resolveDownloadName = (response, fallback) => {
@@ -555,6 +642,35 @@ onBeforeUnmount(revokeMaterialPreviews)
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
+}
+
+.transfer-progress {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #dbe7f3;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.transfer-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #486581;
+  font-size: 13px;
+}
+
+.transfer-progress-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-progress-head strong {
+  color: #102a43;
 }
 
 .answer-editor {

@@ -126,13 +126,14 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { getLearningItems, getLearningItemPreview } from '@/api/knowledge'
 import ExperimentOverlay from '@/components/ExperimentOverlay.vue'
 import KnowledgeCardsSection from '@/components/knowledge/KnowledgeCardsSection.vue'
 import DashboardSection from '@/components/knowledge/DashboardSection.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const activeSection = ref('cards')
@@ -170,9 +171,18 @@ const filteredItems = computed(() => {
 })
 
 const filterByCategory = () => {
-  // 分类改变时自动过滤
+  const query = { ...route.query }
+  if (selectedCategory.value) {
+    query.category = selectedCategory.value
+  } else {
+    delete query.category
+  }
+  router.replace({ path: '/knowledge', query }).catch(() => {})
 }
 
+const syncCategoryFromRoute = () => {
+  selectedCategory.value = typeof route.query.category === 'string' ? route.query.category : ''
+}
 const querySearch = (queryString, cb) => {
   const keyword = queryString.trim().toLowerCase()
   if (!keyword) {
@@ -262,8 +272,16 @@ const getDifficultyClass = (difficulty) => {
 }
 
 onMounted(() => {
+  syncCategoryFromRoute()
   loadItems()
 })
+
+watch(
+  () => route.query.category,
+  () => {
+    syncCategoryFromRoute()
+  }
+)
 
 watch(experimentVisible, (visible) => {
   if (!visible) {

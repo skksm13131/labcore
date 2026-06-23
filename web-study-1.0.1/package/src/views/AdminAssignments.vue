@@ -192,6 +192,20 @@
                 <el-button>上传文档</el-button>
               </el-upload>
             </div>
+            <div v-if="materialUploadProgress.visible" class="transfer-progress">
+              <div class="transfer-progress-head">
+                <span>{{ materialUploadProgress.name }}</span>
+                <strong>{{ materialUploadProgress.percent }}%</strong>
+              </div>
+              <el-progress :percentage="materialUploadProgress.percent" :status="materialUploadProgress.status" />
+            </div>
+            <div v-if="materialDownloadProgress.visible" class="transfer-progress">
+              <div class="transfer-progress-head">
+                <span>{{ materialDownloadProgress.name }}</span>
+                <strong>{{ materialDownloadProgress.label }}</strong>
+              </div>
+              <el-progress :percentage="materialDownloadProgress.percent" :indeterminate="materialDownloadProgress.indeterminate" />
+            </div>
             <el-table :data="form.materials" size="small" stripe>
               <el-table-column prop="title" label="材料" min-width="180" />
               <el-table-column label="类型" width="90">
@@ -242,6 +256,9 @@ const status = ref('')
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+const materialUploadProgress = ref({ visible: false, name: '', percent: 0, status: '' })
+const materialDownloadProgress = ref({ visible: false, name: '', percent: 0, label: '', indeterminate: false })
+const maxSingleUploadBytes = 300 * 1024 * 1024
 
 const form = reactive(blankForm())
 const stats = reactive({
@@ -349,8 +366,24 @@ const saveAssignment = async () => {
 
 const uploadMaterial = async (materialType, uploadFileInfo) => {
   if (!form.assignmentId || !uploadFileInfo?.raw) return
-  const material = await uploadAdminAssignmentMaterial(form.assignmentId, materialType, uploadFileInfo.raw)
+  const file = uploadFileInfo.raw
+  if (file.size > maxSingleUploadBytes) {
+    ElMessage.error(`单个文件不能超过 ${formatSize(maxSingleUploadBytes)}`)
+    return
+  }
+  materialUploadProgress.value = { visible: true, name: file.name || 'upload', percent: 0, status: '' }
+  const material = await uploadAdminAssignmentMaterial(form.assignmentId, materialType, file, '', {
+    onUploadProgress: event => {
+      if (!event.total) return
+      materialUploadProgress.value.percent = Math.min(99, Math.round((event.loaded / event.total) * 100))
+    }
+  })
+  materialUploadProgress.value.percent = 100
+  materialUploadProgress.value.status = 'success'
   form.materials.push(material)
+  window.setTimeout(() => {
+    materialUploadProgress.value = { visible: false, name: '', percent: 0, status: '' }
+  }, 800)
   ElMessage.success('材料上传成功')
 }
 
@@ -378,12 +411,54 @@ const downloadMaterial = async material => {
     ElMessage.error('下载失败，请稍后重试')
     return
   }
-  const blob = await response.blob()
+  const blob = await readMaterialBlobWithProgress(response, material.originalName || material.title || 'download')
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
   link.download = resolveDownloadName(response, material.originalName)
   link.click()
   URL.revokeObjectURL(link.href)
+}
+
+const readMaterialBlobWithProgress = async (response, name) => {
+  const total = Number(response.headers.get('Content-Length') || 0)
+  materialDownloadProgress.value = {
+    visible: true,
+    name,
+    percent: 0,
+    label: total ? '0%' : 'Downloading',
+    indeterminate: !total
+  }
+  try {
+    if (!response.body || !response.body.getReader) {
+      const blob = await response.blob()
+      materialDownloadProgress.value.percent = 100
+      materialDownloadProgress.value.label = '100%'
+      return blob
+    }
+    const reader = response.body.getReader()
+    const chunks = []
+    let loaded = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      loaded += value.length
+      if (total) {
+        const percent = Math.min(99, Math.round((loaded / total) * 100))
+        materialDownloadProgress.value.percent = percent
+        materialDownloadProgress.value.label = `${percent}%`
+      } else {
+        materialDownloadProgress.value.label = formatSize(loaded)
+      }
+    }
+    materialDownloadProgress.value.percent = 100
+    materialDownloadProgress.value.label = '100%'
+    return new Blob(chunks)
+  } finally {
+    window.setTimeout(() => {
+      materialDownloadProgress.value = { visible: false, name: '', percent: 0, label: '', indeterminate: false }
+    }, 800)
+  }
 }
 
 const normalizeRequirements = questions => {
@@ -587,6 +662,35 @@ onMounted(loadAssignments)
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.transfer-progress {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #dbe7f3;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.transfer-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #486581;
+  font-size: 13px;
+}
+
+.transfer-progress-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-progress-head strong {
+  color: #102a43;
 }
 
 .question-card {
