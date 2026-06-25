@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="assessment-detail-page">
     <div class="detail-shell">
       <section v-loading="loading" class="detail-hero">
