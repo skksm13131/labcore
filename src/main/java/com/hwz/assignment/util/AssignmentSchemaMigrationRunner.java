@@ -49,6 +49,7 @@ public class AssignmentSchemaMigrationRunner implements CommandLineRunner {
                 "assignment_id BIGINT NOT NULL," +
                 "student_id BIGINT NOT NULL," +
                 "status VARCHAR(20) NOT NULL DEFAULT 'DRAFT'," +
+                "answer_text TEXT NULL," +
                 "submitted_at DATETIME NULL," +
                 "graded_at DATETIME NULL," +
                 "score DECIMAL(6,2) NULL," +
@@ -62,6 +63,15 @@ public class AssignmentSchemaMigrationRunner implements CommandLineRunner {
                 "KEY idx_assignment_submission_student (student_id)," +
                 "KEY idx_assignment_submission_status (status)" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        Integer answerTextColumnCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS " +
+                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'assignment_submission' " +
+                        "AND COLUMN_NAME = 'answer_text'",
+                Integer.class);
+        if (answerTextColumnCount != null && answerTextColumnCount == 0) {
+            jdbcTemplate.execute("ALTER TABLE assignment_submission ADD COLUMN answer_text TEXT NULL AFTER status");
+        }
 
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS assignment_submission_file (" +
                 "file_id BIGINT NOT NULL AUTO_INCREMENT," +

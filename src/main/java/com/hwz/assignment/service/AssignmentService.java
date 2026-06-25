@@ -241,6 +241,7 @@ public class AssignmentService {
     @Transactional
     public AssignmentDtos.SubmissionDetail createOrGetSubmission(Long assignmentId, User user) {
         Assignment assignment = getPublishedAssignmentOrThrow(assignmentId);
+        ensureAssignmentOpen(assignment);
         AssignmentSubmission submission = findSubmission(assignment.getAssignmentId(), user.getId());
         if (submission == null) {
             LocalDateTime now = LocalDateTime.now();
@@ -259,6 +260,7 @@ public class AssignmentService {
     @Transactional
     public AssignmentDtos.SubmissionDetail uploadFile(Long assignmentId, User user, String fileType, MultipartFile file) {
         Assignment assignment = getPublishedAssignmentOrThrow(assignmentId);
+        ensureAssignmentOpen(assignment);
         AssignmentSubmission submission = findOrCreateSubmission(assignment.getAssignmentId(), user.getId());
         ensureSubmissionEditable(submission);
         ensureUploadQuota(submission.getSubmissionId(), file);
@@ -270,6 +272,7 @@ public class AssignmentService {
     @Transactional
     public AssignmentDtos.SubmissionDetail saveAnswer(Long assignmentId, User user, AssignmentDtos.AnswerSaveRequest request) {
         Assignment assignment = getPublishedAssignmentOrThrow(assignmentId);
+        ensureAssignmentOpen(assignment);
         String answerText = request == null ? null : request.getAnswerText();
         AssignmentSubmission submission = findSubmission(assignment.getAssignmentId(), user.getId());
         if (submission == null && !StringUtils.hasText(answerText)) {
@@ -291,6 +294,7 @@ public class AssignmentService {
     @Transactional
     public AssignmentDtos.SubmissionDetail submit(Long assignmentId, User user, AssignmentDtos.AnswerSaveRequest request) {
         Assignment assignment = getPublishedAssignmentOrThrow(assignmentId);
+        ensureAssignmentOpen(assignment);
         AssignmentSubmission submission = findOrCreateSubmission(assignment.getAssignmentId(), user.getId());
         ensureSubmissionEditable(submission);
         if (request != null) {
@@ -302,8 +306,7 @@ public class AssignmentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u8bf7\u5148\u586b\u5199\u6587\u5b57\u7b54\u6848\u6216\u4e0a\u4f20\u6750\u6599\u540e\u518d\u63d0\u4ea4\u8003\u6838");
         }
         LocalDateTime now = LocalDateTime.now();
-        submission.setStatus(assignment.getDeadline() != null && now.isAfter(assignment.getDeadline())
-                ? SUBMISSION_LATE : SUBMISSION_SUBMITTED);
+        submission.setStatus(SUBMISSION_SUBMITTED);
         submission.setSubmittedAt(now);
         submission.setUpdatedAt(now);
         submissionMapper.updateById(submission);
@@ -320,6 +323,7 @@ public class AssignmentService {
         if (!submission.getStudentId().equals(user.getId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "\u65e0\u6743\u5220\u9664\u8be5\u6587\u4ef6");
         }
+        ensureAssignmentOpen(getPublishedAssignmentOrThrow(submission.getAssignmentId()));
         ensureSubmissionEditable(submission);
         fileStorageService.delete(file);
         fileMapper.deleteById(fileId);
@@ -783,6 +787,14 @@ public class AssignmentService {
         }
         if (SUBMISSION_GRADED.equalsIgnoreCase(submission.getStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "\u5df2\u8bc4\u5206\u7684\u63d0\u4ea4\u4e0d\u80fd\u518d\u4fee\u6539");
+        }
+    }
+
+    private void ensureAssignmentOpen(Assignment assignment) {
+        LocalDateTime deadline = assignment == null ? null : assignment.getDeadline();
+        if (deadline != null && !LocalDateTime.now().isBefore(deadline)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "\u8003\u6838\u5df2\u622a\u6b62\uff0c\u4e0d\u80fd\u518d\u4fee\u6539\u6216\u63d0\u4ea4");
         }
     }
 

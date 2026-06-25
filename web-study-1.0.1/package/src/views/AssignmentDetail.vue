@@ -15,8 +15,8 @@
             <span>满分 {{ detail.totalScore || 100 }}</span>
             <span>得分 {{ detail.mySubmission?.score ?? '-' }}</span>
           </div>
-          <el-tag :type="submissionTag(detail?.mySubmission?.status)" size="large">
-            {{ submissionText(detail?.mySubmission?.status) }}
+          <el-tag :type="displayStatusTag" size="large">
+            {{ displayStatusText }}
           </el-tag>
         </div>
       </section>
@@ -126,7 +126,7 @@
               :disabled="submitDisabled"
               @click="submitCurrent"
             >
-              提交考核
+              {{ deadlinePassed ? '考核已截止' : '提交考核' }}
             </el-button>
             <p class="submit-hint">
               {{ submitHint }}
@@ -172,10 +172,31 @@ const materialPreviewUrls = ref({})
 const uploadProgress = ref({ visible: false, name: '', percent: 0, status: '' })
 const downloadProgress = ref({ visible: false, name: '', percent: 0, label: '', indeterminate: false })
 const maxSingleUploadBytes = 300 * 1024 * 1024
+const currentTime = ref(Date.now())
+let deadlineTimer = null
 
 const assignmentId = computed(() => route.params.assignmentId)
 
-const locked = computed(() => detail.value?.mySubmission?.status === 'GRADED')
+const deadlinePassed = computed(() => {
+  const deadline = detail.value?.deadline
+  if (!deadline) return false
+  const timestamp = new Date(deadline).getTime()
+  return Number.isFinite(timestamp) && currentTime.value >= timestamp
+})
+
+const locked = computed(() => detail.value?.mySubmission?.status === 'GRADED' || deadlinePassed.value)
+
+const displayStatusText = computed(() => {
+  const status = detail.value?.mySubmission?.status
+  if (deadlinePassed.value && (!status || status === 'DRAFT' || status === 'RETURNED')) return '已截止'
+  return submissionText(status)
+})
+
+const displayStatusTag = computed(() => {
+  const status = detail.value?.mySubmission?.status
+  if (deadlinePassed.value && (!status || status === 'DRAFT' || status === 'RETURNED')) return 'info'
+  return submissionTag(status)
+})
 
 const assessmentRequirement = computed(() => {
   const current = detail.value
@@ -200,6 +221,7 @@ const submitDisabled = computed(() => {
 const submitHint = computed(() => {
   const submission = detail.value?.mySubmission
   if (submission?.status === 'GRADED') return '该考核已完成评分，不能再修改提交。'
+  if (deadlinePassed.value) return '考核已截止，不能再保存草稿、上传材料或提交。'
   if (!answerText.value.trim() && !submission?.files?.length) return '请填写文字答案，或上传至少一份文档/视频材料后再提交。'
   return '确认文字答案和材料无误后提交，提交后老师即可在后台查看并评分。'
 })
@@ -234,7 +256,7 @@ const revokeMaterialPreviews = () => {
 }
 
 const saveAnswer = async () => {
-  if (!assignmentId.value) return
+  if (!assignmentId.value || locked.value) return
   answerSaving.value = true
   try {
     const submission = await saveSubmissionAnswer(assignmentId.value, answerText.value)
@@ -295,6 +317,7 @@ const deleteFile = async file => {
 }
 
 const submitCurrent = async () => {
+  if (locked.value) return
   await submitAssignment(assignmentId.value, answerText.value)
   ElMessage.success('提交成功')
   await loadDetail()
@@ -424,8 +447,18 @@ const submissionTag = status => ({
   RETURNED: 'info'
 }[status] || '')
 
-onMounted(loadDetail)
-onBeforeUnmount(revokeMaterialPreviews)
+onMounted(() => {
+  loadDetail()
+  deadlineTimer = window.setInterval(() => {
+    currentTime.value = Date.now()
+  }, 1000)
+})
+onBeforeUnmount(() => {
+  revokeMaterialPreviews()
+  if (deadlineTimer) {
+    window.clearInterval(deadlineTimer)
+  }
+})
 </script>
 
 <style scoped>
