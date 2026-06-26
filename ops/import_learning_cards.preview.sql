@@ -1,9 +1,8 @@
 -- LabCore agent learning cards import generated from new_card/*.json.
--- Import target database: labcore.
+-- Usage:
+--   mysql -uroot -p labcore < ops/import_learning_cards.preview.sql
 -- Notebook templates: data/learning-templates/item-53..item-57/template.ipynb.
 SET NAMES utf8mb4;
-CREATE DATABASE IF NOT EXISTS `labcore` DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci;
-USE `labcore`;
 
 -- Safe column patches for older learning_item tables.
 SET @schema_name := DATABASE();

@@ -35,7 +35,7 @@ run_sql() {
 }
 
 run_sql "$SQL_DIR/assignment_module.sql"
-run_sql "$SQL_DIR/assignment_answer_text_migration.sql"
+run_sql "$SQL_DIR/migrations/202606_assignment_answer_text.sql"
 
 if [[ "${RUN_DEMO_SEED:-0}" == "1" ]]; then
   run_sql "$SQL_DIR/seed_assessment_demo.sql"

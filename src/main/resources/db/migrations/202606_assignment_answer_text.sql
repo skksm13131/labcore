@@ -1,7 +1,7 @@
 -- Add text-answer support for ability assessments.
 -- Run this on existing deployments before starting the updated application.
-
-USE `labcore`;
+-- Usage:
+--   mysql -uroot -p labcore < migrations/202606_assignment_answer_text.sql
 
 SET @has_answer_text = (
   SELECT COUNT(*)

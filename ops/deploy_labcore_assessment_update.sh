@@ -128,7 +128,7 @@ fi
 echo "Detected layout: $LAYOUT"
 
 run_sql "$PACKAGE_DIR/db/assignment_module.sql"
-run_sql "$PACKAGE_DIR/db/assignment_answer_text_migration.sql"
+run_sql "$PACKAGE_DIR/db/migrations/202606_assignment_answer_text.sql"
 
 APP_CONFIG="$BASE_DIR/backend/application.properties"
 if [[ -f "$APP_CONFIG" ]]; then

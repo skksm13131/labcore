@@ -1,8 +1,15 @@
 -- Demo assessment data for local UI review.
 -- Safe to re-run: existing demo assessments with title prefix "样例-" are removed first.
+-- Usage:
+--   mysql -uroot -p labcore < seed_assessment_demo.sql
 
-USE `labcore`;
 SET NAMES utf8mb4;
+
+INSERT IGNORE INTO sys_user (username, password, display_name, role, status, created_time, updated_time)
+VALUES ('admin', '$2a$10$q/sC6nZS7QzHX.n6YAa3VeiXPXhIoAKopzHOPjoUH2A1HNJXc6DrS', '管理员', 'ADMIN', 'ACTIVE', NOW(), NOW());
+
+INSERT IGNORE INTO sys_user (username, password, display_name, role, status, created_time, updated_time)
+VALUES ('demo_student', '$2a$10$q/sC6nZS7QzHX.n6YAa3VeiXPXhIoAKopzHOPjoUH2A1HNJXc6DrS', '演示学生', 'USER', 'ACTIVE', NOW(), NOW());
 
 SET @admin_id = (SELECT user_id FROM sys_user WHERE username = 'admin' LIMIT 1);
 SET @student_a = COALESCE((SELECT user_id FROM sys_user WHERE role <> 'ADMIN' ORDER BY user_id LIMIT 1), @admin_id);

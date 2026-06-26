@@ -1,11 +1,8 @@
 -- LabCore assignment module schema.
--- Target database name used by local and server deployment: labcore.
-
-CREATE DATABASE IF NOT EXISTS `labcore`
-  DEFAULT CHARACTER SET utf8mb4
-  DEFAULT COLLATE utf8mb4_unicode_ci;
-
-USE `labcore`;
+-- Usage:
+--   mysql -uroot -p labcore < assignment_module.sql
+--
+-- This script intentionally does not create or select a database.
 
 CREATE TABLE IF NOT EXISTS `assignment` (
   `assignment_id` bigint NOT NULL AUTO_INCREMENT,
